@@ -1,4 +1,6 @@
 import LandingUi from '../components/LandingUi';
+import { redirect } from 'next/navigation';
+import { createClient } from '@/lib/supabase/server';
 
 export const metadata = {
     title: 'ClaukkPOS — Point of sale you pay for by the day',
@@ -29,8 +31,18 @@ export const metadata = {
     },
 };
 
+export default async function Home() {
+    const supabase = await createClient();
+    const {
+        data: { user },
+    } = await supabase.auth.getUser();
 
-export default function Home() {
+    // Signed-in users go straight to the dashboard.
+    // This runs on the server, so no landing-page flash.
+    if (user) {
+        redirect('/dashboard');
+    }
+
     return (
         <>
             <LandingUi />
