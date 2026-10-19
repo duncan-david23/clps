@@ -30,7 +30,7 @@ const ini = (n) =>
     .slice(0, 2);
 
 /* ============================================================
-   Sound
+   Sound — "drop in the cart" for success, muted buzz for error
    ============================================================ */
 let _audioCtx = null;
 
@@ -62,31 +62,38 @@ function beep(ok) {
     const now = ctx.currentTime;
 
     if (ok) {
+      // Classic barcode-scanner beep:
+      // a single sharp tone around 2000 Hz lasting ~70ms.
       const osc = ctx.createOscillator();
-      osc.type = "square";
-      osc.frequency.setValueAtTime(2700, now);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(2000, now);
+
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, now);
-      g.gain.exponentialRampToValueAtTime(0.7, now + 0.004);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
+      g.gain.exponentialRampToValueAtTime(0.35, now + 0.005);  // quick attack
+      g.gain.setValueAtTime(0.35, now + 0.06);                  // hold flat
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.075); // clean release
+
       osc.connect(g);
       g.connect(ctx.destination);
       osc.start(now);
-      osc.stop(now + 0.11);
+      osc.stop(now + 0.08);
     } else {
-      [0, 0.14].forEach((offset) => {
-        const osc = ctx.createOscillator();
-        osc.type = "square";
-        osc.frequency.setValueAtTime(500, now + offset);
-        const g = ctx.createGain();
-        g.gain.setValueAtTime(0.0001, now + offset);
-        g.gain.exponentialRampToValueAtTime(0.6, now + offset + 0.004);
-        g.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.09);
-        osc.connect(g);
-        g.connect(ctx.destination);
-        osc.start(now + offset);
-        osc.stop(now + offset + 0.1);
-      });
+      // Distinct low "error" tone — same style, lower pitch.
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(600, now);
+
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(0.3, now + 0.005);
+      g.gain.setValueAtTime(0.3, now + 0.1);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+
+      osc.connect(g);
+      g.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.13);
     }
   } catch (e) {
     console.warn("beep failed:", e);
@@ -137,11 +144,10 @@ function eanSvg(code) {
 /* ============================================================
    Receipt
    ============================================================ */
-function Receipt({ r, biz, logo, id = "rcpt", width = "80mm" }) {
+function Receipt({ r, biz, logo, id = "rcpt" }) {
   return (
     <div
       id={id}
-      style={{ ["--rcpt-width"]: width }}
       className="mx-auto w-full max-w-[320px] rounded-md border border-lk bg-white px-[18px] py-5 text-[12px] text-bg"
     >
       <div className="flex flex-col items-center gap-2 border-b border-dashed border-lk pb-3 text-center">
@@ -234,7 +240,35 @@ function Receipt({ r, biz, logo, id = "rcpt", width = "80mm" }) {
 }
 
 /* ============================================================
-   Scanner source picker — Camera or USB/Bluetooth scanner
+   Cart thumbnail
+   ============================================================ */
+function CartThumb({ product }) {
+  const [failed, setFailed] = useState(false);
+  const showImg = product.image_url && !failed;
+
+  return (
+    <div className="grid h-10 w-10 flex-none place-items-center overflow-hidden rounded-lg bg-white/5">
+      {showImg ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={product.image_url}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          className="h-full w-full object-cover"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <span className="text-[11px] font-extrabold text-emb">
+          {ini(product.name)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   Scanner source picker
    ============================================================ */
 function ScanSourceModal({
   onClose,
@@ -266,7 +300,7 @@ function ScanSourceModal({
       <div className="w-full max-w-[440px] rounded-2xl bg-white p-6">
         <h2 className="m-0 text-[18px] font-bold">How do you want to scan?</h2>
         <p className="mt-1 text-[13px] text-gray-dim">
-          Choose the scanner you're using for this sale.
+          Choose the scanner you&apos;re using for this sale.
         </p>
 
         <div className="mt-4 grid gap-2.5">
@@ -340,7 +374,7 @@ function ScanSourceModal({
 }
 
 /* ============================================================
-   Scanner modal (camera)
+   Camera scanner modal
    ============================================================ */
 function ScanModal({ onClose, onDetect }) {
   const videoRef = useRef(null);
@@ -655,7 +689,7 @@ function ScanModal({ onClose, onDetect }) {
 }
 
 /* ============================================================
-   Checkout modal — Cash, Paystack, Split
+   Checkout modal
    ============================================================ */
 function CheckoutModal({
   lines,
@@ -753,9 +787,7 @@ function CheckoutModal({
       );
     }
     if (typeof window === "undefined" || !window.PaystackPop) {
-      return setPaystackError(
-        "Payment is still loading. Try again in a second."
-      );
+      return setPaystackError("Payment is still loading. Try again in a second.");
     }
 
     setPaystackBusy(true);
@@ -843,8 +875,7 @@ function CheckoutModal({
     if (paystackBusy) return false;
     if (pay === "cash") return cashNum >= totalNum;
     if (pay === "paystack") return true;
-    if (pay === "split")
-      return cashNum > 0 && cashNum < totalNum && momoPortion > 0;
+    if (pay === "split") return cashNum > 0 && cashNum < totalNum && momoPortion > 0;
     return false;
   })();
 
@@ -857,11 +888,13 @@ function CheckoutModal({
     return "SELECT A METHOD";
   })();
 
+  const locked = saving || paystackBusy;
+
   return (
     <div
       className="fixed inset-0 z-10 grid place-items-center bg-black/70 p-4"
       onClick={(e) => {
-        if (e.target === e.currentTarget && stage !== 2 && !saving) onClose();
+        if (e.target === e.currentTarget && stage !== 2 && !locked) onClose();
       }}
     >
       <div className="max-h-[92vh] w-full max-w-[440px] overflow-auto rounded-2xl bg-white p-6">
@@ -902,18 +935,15 @@ function CheckoutModal({
               <button
                 className="rounded-lg border border-black bg-black py-2.5 text-[14px] font-semibold text-white"
                 onClick={() => {
-                  // Give React a tick so #rcpt is laid out before printing
-                  requestAnimationFrame(() => window.print());
+                  requestAnimationFrame(() =>
+                    requestAnimationFrame(() =>
+                      setTimeout(() => window.print(), 50)
+                    )
+                  );
                 }}
               >
                 Print receipt
               </button>
-              {/* <button
-                className="rounded-lg border border-lk bg-transparent py-2.5 text-[14px] font-semibold"
-                onClick={() => alert("Receipt link copied")}
-              >
-                Share receipt
-              </button> */}
             </div>
             <button
               disabled={saving}
@@ -1092,7 +1122,7 @@ function CheckoutModal({
             )}
 
             <button
-              disabled={!canSubmit}
+              disabled={!canSubmit || locked}
               className="mt-4 w-full rounded-lg border border-emb bg-emb py-3.5 text-[14px] font-extrabold text-bg transition-colors hover:bg-em disabled:opacity-60"
               onClick={() => {
                 if (pay === "cash") completeCash();
@@ -1104,8 +1134,9 @@ function CheckoutModal({
             </button>
 
             <button
-              className="mt-2 w-full rounded-lg border border-lk bg-transparent py-2.5 text-[14px] font-semibold"
+              className="mt-2 w-full rounded-lg border border-lk bg-transparent py-2.5 text-[14px] font-semibold disabled:opacity-60"
               onClick={onClose}
+              disabled={locked}
             >
               Back to cart
             </button>
@@ -1117,7 +1148,7 @@ function CheckoutModal({
 }
 
 /* ============================================================
-   Product Card
+   Product card
    ============================================================ */
 function ProductCard({ p, qty, onAdd }) {
   const out = p.stock === 0;
@@ -1155,11 +1186,7 @@ function ProductCard({ p, qty, onAdd }) {
 
         <span
           className={`absolute left-2 top-2 rounded-full px-2.5 py-[2px] text-[11px] font-bold ${
-            out
-              ? "bg-black text-gray"
-              : low
-              ? "bg-black text-emb"
-              : "bg-black text-emb"
+            out ? "bg-black text-gray" : "bg-black text-emb"
           }`}
         >
           {out
@@ -1197,17 +1224,13 @@ function ProductCard({ p, qty, onAdd }) {
 
 /* ============================================================
    USB / Bluetooth scanner detection hook
-   ------------------------------------------------------------
-   Barcode guns act as keyboards. A real scan produces a rapid
-   burst of keystrokes (< ~35ms apart) ending in Enter/Tab.
-   Human typing is much slower. We use that timing signature
-   to detect a scanner without needing special browser APIs.
    ============================================================ */
 function useScannerDetection({ enabled = true, onScan }) {
   const [connected, setConnected] = useState(false);
-  const [lastSeen, setLastSeen] = useState(0);
   const bufRef = useRef("");
   const timesRef = useRef([]);
+  const lastSeenRef = useRef(0);
+  const testingRef = useRef(false);
   const onScanRef = useRef(onScan);
 
   useEffect(() => {
@@ -1217,28 +1240,31 @@ function useScannerDetection({ enabled = true, onScan }) {
   useEffect(() => {
     if (!enabled || typeof window === "undefined") return;
 
-    const SCAN_MAX_GAP = 45;     // ms between keystrokes in a scan burst
-    const SCAN_MIN_LEN = 4;      // shortest barcode we care about
-    const CONNECT_WINDOW = 8000; // scanner considered "connected" for 8s after a burst
+    const SCAN_MAX_GAP = 45;
+    const SCAN_MIN_LEN = 4;
+    const CONNECT_WINDOW = 8000;
+
+    const isTypingTarget = (el) => {
+      if (!el) return false;
+      const tag = el.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+    };
 
     const onKey = (e) => {
-      // Ignore modifier-only keydowns
+      if (testingRef.current) return;
       if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") {
         return;
       }
+      if (isTypingTarget(document.activeElement)) return;
 
       const now = performance.now();
-
-      // Check the gap since the last keypress
       const prev = timesRef.current[timesRef.current.length - 1] || 0;
       const gap = prev ? now - prev : Infinity;
 
       if (gap > SCAN_MAX_GAP) {
-        // Too slow — start a fresh buffer
         bufRef.current = "";
         timesRef.current = [];
       }
-
       timesRef.current.push(now);
 
       if (e.key === "Enter" || e.key === "Tab") {
@@ -1247,16 +1273,13 @@ function useScannerDetection({ enabled = true, onScan }) {
         timesRef.current = [];
 
         if (code.length >= SCAN_MIN_LEN) {
-          // Mark scanner as connected
           setConnected(true);
-          setLastSeen(Date.now());
-          // Fire the scan callback
+          lastSeenRef.current = Date.now();
           if (onScanRef.current) onScanRef.current(code);
         }
         return;
       }
 
-      // Only count printable single chars
       if (e.key.length === 1) {
         bufRef.current += e.key;
       }
@@ -1264,11 +1287,10 @@ function useScannerDetection({ enabled = true, onScan }) {
 
     window.addEventListener("keydown", onKey, true);
 
-    // Background check: if we haven't seen a scan in CONNECT_WINDOW, mark
-    // as not connected (so the UI can show "not detected").
     const interval = window.setInterval(() => {
-      if (lastSeen && Date.now() - lastSeen > CONNECT_WINDOW) {
+      if (lastSeenRef.current && Date.now() - lastSeenRef.current > CONNECT_WINDOW) {
         setConnected(false);
+        lastSeenRef.current = 0;
       }
     }, 2000);
 
@@ -1276,44 +1298,52 @@ function useScannerDetection({ enabled = true, onScan }) {
       window.removeEventListener("keydown", onKey, true);
       window.clearInterval(interval);
     };
-  }, [enabled, lastSeen]);
+  }, [enabled]);
 
-  // Manual "test connection" — waits up to 6s for a scan burst
   const testConnection = () =>
     new Promise((resolve) => {
-      let done = false;
-      const handler = (e) => {
-        if (done) return;
-        const now = performance.now();
-        const prev = timesRef.current[timesRef.current.length - 1] || 0;
-        const gap = prev ? now - prev : Infinity;
-        if (gap > SCAN_MAX_GAP) {
-          bufRef.current = "";
-          timesRef.current = [];
-        }
-        timesRef.current.push(now);
-        if (e.key === "Enter" || e.key === "Tab") {
-          if (bufRef.current.length >= SCAN_MIN_LEN) {
-            done = true;
-            setConnected(true);
-            setLastSeen(Date.now());
-            window.removeEventListener("keydown", handler, true);
-            resolve(true);
-          }
-          bufRef.current = "";
-          timesRef.current = [];
-          return;
-        }
-        if (e.key.length === 1) bufRef.current += e.key;
-      };
-      window.addEventListener("keydown", handler, true);
+      if (typeof window === "undefined") return resolve(false);
 
-      setTimeout(() => {
+      testingRef.current = true;
+      let buf = "";
+      let last = 0;
+      let done = false;
+      const SCAN_MAX_GAP = 45;
+      const SCAN_MIN_LEN = 4;
+
+      const finish = (result) => {
         if (done) return;
         done = true;
+        testingRef.current = false;
         window.removeEventListener("keydown", handler, true);
-        resolve(false);
-      }, 6000);
+        clearTimeout(timer);
+        resolve(result);
+      };
+
+      const handler = (e) => {
+        if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") {
+          return;
+        }
+        const now = performance.now();
+        const gap = last ? now - last : Infinity;
+        if (gap > SCAN_MAX_GAP) buf = "";
+        last = now;
+
+        if (e.key === "Enter" || e.key === "Tab") {
+          if (buf.length >= SCAN_MIN_LEN) {
+            setConnected(true);
+            lastSeenRef.current = Date.now();
+            finish(true);
+          }
+          buf = "";
+          return;
+        }
+        if (e.key.length === 1) buf += e.key;
+      };
+
+      const timer = setTimeout(() => finish(false), 6000);
+
+      window.addEventListener("keydown", handler, true);
     });
 
   return { connected, testConnection };
@@ -1350,11 +1380,11 @@ export default function POSPage() {
   const [lastReceipt, setLastReceipt] = useState(null);
   const searchRef = useRef(null);
 
-  // Refs so the global scanner hook always sees the latest state
-  const cartRef = useRef(cart);
   const productsRef = useRef(products);
-  useEffect(() => { cartRef.current = cart; }, [cart]);
   useEffect(() => { productsRef.current = products; }, [products]);
+
+  const usbScanReadyRef = useRef(usbScanReady);
+  useEffect(() => { usbScanReadyRef.current = usbScanReady; }, [usbScanReady]);
 
   useEffect(() => {
     const id = window.localStorage.getItem("claukk_staff_id");
@@ -1391,8 +1421,7 @@ export default function POSPage() {
       if (profile?.business_logo) setLogo(profile.business_logo);
 
       setPaymentMethods(
-        Array.isArray(profile?.payment_methods) &&
-          profile.payment_methods.length
+        Array.isArray(profile?.payment_methods) && profile.payment_methods.length
           ? profile.payment_methods
           : ["cash"]
       );
@@ -1477,22 +1506,20 @@ export default function POSPage() {
     [cart, products]
   );
 
-  const cartItemCount = useMemo(
-    () => cart.reduce((a, [, n]) => a + n, 0),
-    [cart]
-  );
-
   const addToCart = (pid) => {
     const p = products.find((x) => x.id === pid);
-    if (!p || p.stock === 0) return;
+    if (!p || p.stock === 0) return { ok: false, reason: "out_of_stock" };
+
+    let result = { ok: false, reason: "max_stock" };
 
     setCart((c) => {
       const idx = c.findIndex((x) => x[0] === pid);
       const currentQty = idx > -1 ? c[idx][1] : 0;
       if (currentQty >= p.stock) {
-        beep(false);
+        result = { ok: false, reason: "max_stock" };
         return c;
       }
+      result = { ok: true, product: p, qty: currentQty + 1 };
       if (idx > -1) {
         const next = [...c];
         next[idx] = [pid, next[idx][1] + 1];
@@ -1500,12 +1527,25 @@ export default function POSPage() {
       }
       return [...c, [pid, 1]];
     });
+
+    return result;
   };
 
   const setQty = (k, d) => {
     setCart((c) => {
+      const [pid, currentQty] = c[k];
+      if (!pid) return c;
+
+      const p = products.find((x) => x.id === pid);
+      const maxStock = p ? p.stock : 0;
+
+      if (d > 0 && currentQty >= maxStock) {
+        beep(false);
+        return c;
+      }
+
       const next = [...c];
-      next[k] = [next[k][0], next[k][1] + d];
+      next[k] = [pid, currentQty + d];
       if (next[k][1] < 1) next.splice(k, 1);
       return next;
     });
@@ -1516,7 +1556,6 @@ export default function POSPage() {
     if (!code) return { ok: false, msg: "Type a barcode or SKU." };
 
     const prods = productsRef.current;
-    const c = cartRef.current;
 
     const p = prods.find(
       (x) =>
@@ -1532,34 +1571,23 @@ export default function POSPage() {
       };
     }
 
-    const inCart = (c.find((x) => x[0] === p.id) || [0, 0])[1];
-    if (!p.stock || inCart >= p.stock) {
+    const res = addToCart(p.id);
+    if (!res.ok) {
       beep(false);
-      return { ok: false, msg: `${p.name}: no more stock available.` };
+      return {
+        ok: false,
+        msg:
+          res.reason === "max_stock"
+            ? `${p.name}: no more stock available.`
+            : `${p.name} is out of stock.`,
+      };
     }
 
-    addToCart(p.id);
     beep(true);
-
-    // Compute the new cart total for the feedback message
-    let total = 0;
-    let count = 0;
-    const nextCart = c.map(([pid, n]) => {
-      if (pid === p.id) return [pid, n + 1];
-      return [pid, n];
-    });
-    if (!c.find((x) => x[0] === p.id)) nextCart.push([p.id, 1]);
-    nextCart.forEach(([pid, n]) => {
-      const prod = prods.find((x) => x.id === pid);
-      if (prod) {
-        total += prod.price * n;
-        count += n;
-      }
-    });
 
     return {
       ok: true,
-      msg: `✓ <b>${p.name}</b> added · ${fm(p.price)}<br><small>Cart: ${count} items · ${fm(total)}</small>`,
+      msg: `✓ <b>${p.name}</b> added · ${fm(p.price)}`,
     };
   };
 
@@ -1671,19 +1699,11 @@ export default function POSPage() {
     }
   };
 
-  /* ----------------------------------------------------------
-     Global USB/Bluetooth scanner detection.
-     Only active once the user has chosen "USB scanner" mode
-     OR when the source picker is open (so we can show the dot).
-     ---------------------------------------------------------- */
   const scannerEnabled = usbScanReady || scanSourceOpen;
 
   const handleUsbScan = (code) => {
-    // If the source picker is open, just note the connection.
-    // If USB mode is armed, push the scan into the cart.
-    if (usbScanReady) {
-      handleCode(code);
-    }
+    if (!usbScanReadyRef.current) return;
+    handleCode(code);
   };
 
   const { connected: usbConnected, testConnection: testUsbConnection } =
@@ -1731,8 +1751,6 @@ export default function POSPage() {
     <div className="flex h-[100dvh] w-full min-w-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-7 md:px-8">
       <style jsx global>{`
         @media print {
-          /* Thermal roll width — 80mm is standard POS paper.
-             58mm for smaller units. */
           @page {
             size: 80mm auto;
             margin: 0;
@@ -1745,16 +1763,10 @@ export default function POSPage() {
             background: #fff !important;
           }
 
-          /* Hide everything by default */
-          body * {
-            visibility: hidden !important;
-          }
+          body * { visibility: hidden !important; }
 
-          /* Only the receipt is visible */
           #rcpt,
-          #rcpt * {
-            visibility: visible !important;
-          }
+          #rcpt * { visibility: visible !important; }
 
           #rcpt {
             position: absolute !important;
@@ -1773,16 +1785,12 @@ export default function POSPage() {
             color: #000 !important;
           }
 
-          /* Don't split the receipt across pages */
           #rcpt, #rcpt * {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
           }
 
-          /* Hide modal chrome and backdrop while printing */
-          .print-hide {
-            display: none !important;
-          }
+          .print-hide { display: none !important; }
         }
       `}</style>
 
@@ -1802,8 +1810,6 @@ export default function POSPage() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={(e) => {
-                // If USB scanner mode is armed, we let the global hook
-                // handle the scan and just clear the visible query.
                 if (e.key === "Enter") {
                   if (usbScanReady) {
                     setQ("");
@@ -1823,14 +1829,10 @@ export default function POSPage() {
             {usbScanReady && (
               <span
                 className={`ml-2 flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${
-                  usbConnected
-                    ? "bg-emd text-emb"
-                    : "bg-black text-gray"
+                  usbConnected ? "bg-emd text-emb" : "bg-black text-gray"
                 }`}
                 title={
-                  usbConnected
-                    ? "USB scanner detected"
-                    : "Waiting for scanner"
+                  usbConnected ? "USB scanner detected" : "Waiting for scanner"
                 }
               >
                 <span
@@ -1845,9 +1847,7 @@ export default function POSPage() {
 
           {usbScanReady && (
             <div className="mt-2 flex items-center justify-between rounded-lg border border-black bg-black px-3 py-2 text-[12px] font-semibold text-emb">
-              <span>
-                USB / Bluetooth scanner armed — pull the trigger to scan.
-              </span>
+              <span>USB / Bluetooth scanner armed — pull the trigger to scan.</span>
               <button
                 onClick={() => setUsbScanReady(false)}
                 className="ml-3 rounded-md border border-emb/40 px-2 py-0.5 text-[11px]"
@@ -1887,7 +1887,10 @@ export default function POSPage() {
                       key={p.id}
                       p={p}
                       qty={qty}
-                      onAdd={addToCart}
+                      onAdd={(pid) => {
+                        const res = addToCart(pid);
+                        if (!res.ok) beep(false);
+                      }}
                     />
                   );
                 })
@@ -1897,9 +1900,7 @@ export default function POSPage() {
         </div>
 
         <div className="flex h-full min-h-0 flex-col rounded-xl bg-black p-5 text-white">
-          <h2 className="mb-3 flex-none text-[16px] font-bold">
-            Current Sale
-          </h2>
+          <h2 className="mb-3 flex-none text-[16px] font-bold">Current Sale</h2>
 
           <div className="min-h-0 flex-1 overflow-y-auto pr-1">
             {cart.length === 0 ? (
@@ -1910,17 +1911,22 @@ export default function POSPage() {
               cart.map(([pid, n], k) => {
                 const p = products.find((x) => x.id === pid);
                 if (!p) return null;
+                const atMax = n >= p.stock;
                 return (
                   <div
                     key={k}
-                    className="flex items-center gap-2.5 border-t border-white/10 py-2.5"
+                    className="flex items-center gap-3 border-t border-white/10 py-2.5"
                   >
-                    <div className="flex-1 leading-[1.3]">
-                      {p.name}
-                      <br />
+                    <CartThumb product={p} />
+
+                    <div className="min-w-0 flex-1 leading-[1.3]">
+                      <div className="truncate text-[14px] font-semibold">
+                        {p.name}
+                      </div>
                       <small className="text-gray">{fm(p.price)} each</small>
                     </div>
-                    <div className="flex items-center gap-1.5">
+
+                    <div className="flex flex-none items-center gap-1.5">
                       <button
                         onClick={() => setQty(k, -1)}
                         className="grid h-[26px] w-[26px] place-items-center rounded-md border border-white/15 bg-white/5 text-white hover:border-emb"
@@ -1933,13 +1939,18 @@ export default function POSPage() {
                       </span>
                       <button
                         onClick={() => setQty(k, 1)}
-                        className="grid h-[26px] w-[26px] place-items-center rounded-md border border-white/15 bg-white/5 text-white hover:border-emb"
+                        disabled={atMax}
+                        className={`grid h-[26px] w-[26px] place-items-center rounded-md border border-white/15 bg-white/5 text-white transition-opacity hover:border-emb ${
+                          atMax ? "cursor-not-allowed opacity-40 hover:border-white/15" : ""
+                        }`}
                         aria-label="More"
+                        title={atMax ? "Stock limit reached" : "Add one more"}
                       >
                         <Plus size={14} />
                       </button>
                     </div>
-                    <b className="min-w-[64px] text-right text-[14px]">
+
+                    <b className="min-w-[64px] flex-none text-right text-[14px]">
                       {fm(p.price * n)}
                     </b>
                   </div>

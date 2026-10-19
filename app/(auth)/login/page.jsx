@@ -51,7 +51,7 @@ export default function LoginPage() {
 
   return (
     <div className="reg">
-      <style dangerouslySetInnerHTML={{ __html: REG_STYLES }} />
+      <style>{REG_STYLES}</style>
 
       <div className="wrap">
         {/* ===== LEFT PANEL ===== */}
@@ -67,15 +67,29 @@ export default function LoginPage() {
           <p>Sign in to pick up right where you left off.</p>
 
           <ul className="pts">
-            <li><i>✓</i>POS, inventory and sales history</li>
-            <li><i>✓</i>Camera and USB barcode scanning</li>
-            <li><i>✓</i>Cash, Paystack and mobile money</li>
-            <li><i>✓</i>Receipts ready to print</li>
+            <li>
+              <i>✓</i>POS, inventory and sales history
+            </li>
+            <li>
+              <i>✓</i>Camera and USB barcode scanning
+            </li>
+            <li>
+              <i>✓</i>Cash, Paystack and mobile money
+            </li>
+            <li>
+              <i>✓</i>Receipts ready to print
+            </li>
           </ul>
 
           <div className="rc">
-            <div><small>24-hour trial</small><b>GHS 10</b></div>
-            <div><small>30-day plan</small><b>GHS 299</b></div>
+            <div>
+              <small>24-hour trial</small>
+              <b>GHS 10</b>
+            </div>
+            <div>
+              <small>30-day plan</small>
+              <b>GHS 199</b>
+            </div>
           </div>
         </aside>
 
@@ -157,7 +171,9 @@ export default function LoginPage() {
                   <input type="checkbox" defaultChecked />
                   <span>Keep me signed in</span>
                 </label>
-                <a href="#" style={{ fontSize: 13 }}>Forgot password?</a>
+                <a href="#" style={{ fontSize: 13 }}>
+                  Forgot password?
+                </a>
               </div>
 
               <button className="btn" type="submit" disabled={submitting}>
@@ -172,8 +188,8 @@ export default function LoginPage() {
               </button>
 
               <p className="note">
-                By signing in you agree to our{' '}
-                <a href="#">Terms of Service</a> and <a href="#">Privacy Policy</a>.
+                By signing in you agree to our <a href="#">Terms of Service</a> and{' '}
+                <a href="#">Privacy Policy</a>.
               </p>
             </form>
           </div>
@@ -324,16 +340,6 @@ const REG_STYLES = `
   .reg .hint { font-size: 12px; color: var(--dim); margin-top: 5px; }
   .reg .hint b { color: var(--em); }
 
-  .reg .str { display: flex; gap: 4px; margin-top: 8px; }
-  .reg .str i {
-    flex: 1; height: 4px; border-radius: 2px;
-    background: var(--lk); transition: .3s;
-  }
-  .reg .str.s1 i:nth-child(-n+1),
-  .reg .str.s2 i:nth-child(-n+2),
-  .reg .str.s3 i:nth-child(-n+3),
-  .reg .str.s4 i:nth-child(-n+4) { background: var(--em); }
-
   .reg .chk {
     display: flex; gap: 10px; align-items: flex-start;
     font-size: 13px; color: var(--dim); margin: 4px 0 20px;
@@ -354,11 +360,6 @@ const REG_STYLES = `
     transform: translateY(-1px);
   }
   .reg .btn:disabled { opacity: .7; transform: none; }
-  .reg .btn.g {
-    background: none; border-color: var(--lk);
-    color: var(--bg); margin-top: 10px;
-  }
-  .reg .btn.g:hover { border-color: var(--em); background: none; }
 
   .reg .sp {
     width: 16px; height: 16px;
@@ -381,10 +382,17 @@ const REG_STYLES = `
     .reg .pts li:nth-child(n+3) { display: none; }
     .reg .R { padding: 24px; }
   }
+
+  /* Reduced motion: only disable motion-only animations. */
   @media (prefers-reduced-motion: reduce) {
-    .reg *, .reg *::before, .reg *::after {
-      animation: none !important; transition: none !important;
+    .reg .L::after,
+    .reg .sp {
+      animation: none !important;
     }
-    .reg .pts li { opacity: 1; transform: none; }
+    .reg .pts li {
+      opacity: 1;
+      transform: none;
+      animation: none !important;
+    }
   }
 `;

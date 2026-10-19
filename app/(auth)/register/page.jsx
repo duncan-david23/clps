@@ -80,67 +80,69 @@ export default function RegisterPage() {
     setStep(1);
   };
 
- const handlePay = () => {
+  const handlePay = () => {
     setAuthError('');
 
     if (typeof window === 'undefined' || !window.PaystackPop) {
-        return setAuthError('Payment is still loading. Try again in a second.');
+      return setAuthError('Payment is still loading. Try again in a second.');
     }
 
     setSubmitting(true);
 
-    const amount = plan === 'trial' ? 1000 : 29900; // pesewas
+    const amount = plan === 'trial' ? 1000 : 19900; // pesewas → GHS 10 / GHS 199
     const days = plan === 'trial' ? 1 : 30;
 
     const handler = window.PaystackPop.setup({
-        key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-        email: values.email,
-        amount,
-        currency: 'GHS',
-        metadata: {
-            custom_fields: [
-                { display_name: 'Plan', variable_name: 'plan', value: plan },
-            ],
-        },
-        callback: (response) => {
-            (async () => {
-                const { data: { user } } = await supabase.auth.getUser();
-                if (!user) {
-                    setSubmitting(false);
-                    return setAuthError('Session lost. Please refresh and try again.');
-                }
-
-                const now = new Date().toISOString();
-
-                const { error } = await supabase
-                    .from('profiles')
-                    .update({
-                        credit_remaining: days,
-                        credits_started_at: now,
-                        last_credit_deduction: now,
-                        updated_at: now,
-                    })
-                    .eq('id', user.id);
-
-                setSubmitting(false);
-
-                if (error) return setAuthError(error.message);
-
-                router.push('/dashboard');
-            })();
-        },
-        onClose: () => {
+      key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
+      email: values.email,
+      amount,
+      currency: 'GHS',
+      metadata: {
+        custom_fields: [
+          { display_name: 'Plan', variable_name: 'plan', value: plan },
+        ],
+      },
+      callback: (response) => {
+        (async () => {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+          if (!user) {
             setSubmitting(false);
-            setAuthError('Payment cancelled.');
-        },
+            return setAuthError('Session lost. Please refresh and try again.');
+          }
+
+          const now = new Date().toISOString();
+
+          const { error } = await supabase
+            .from('profiles')
+            .update({
+              credit_remaining: days,
+              credits_started_at: now,
+              last_credit_deduction: now,
+              updated_at: now,
+            })
+            .eq('id', user.id);
+
+          setSubmitting(false);
+
+          if (error) return setAuthError(error.message);
+
+          router.push('/dashboard');
+        })();
+      },
+      onClose: () => {
+        setSubmitting(false);
+        setAuthError('Payment cancelled.');
+      },
     });
 
     handler.openIframe();
-};
+  };
 
   return (
     <div className="reg">
-      <style dangerouslySetInnerHTML={{ __html: REG_STYLES }} />
+      <style>{REG_STYLES}</style>
 
       <div className="wrap">
         {/* ===== LEFT PANEL ===== */}
@@ -156,15 +158,29 @@ export default function RegisterPage() {
           <p>Create your account, pick how to start, and make your first sale today.</p>
 
           <ul className="pts">
-            <li><i>✓</i>POS, inventory and sales history</li>
-            <li><i>✓</i>Camera and USB barcode scanning</li>
-            <li><i>✓</i>Cash, Paystack and mobile money</li>
-            <li><i>✓</i>Receipts ready to print</li>
+            <li>
+              <i>✓</i>POS, inventory and sales history
+            </li>
+            <li>
+              <i>✓</i>Camera and USB barcode scanning
+            </li>
+            <li>
+              <i>✓</i>Cash, Paystack and mobile money
+            </li>
+            <li>
+              <i>✓</i>Receipts ready to print
+            </li>
           </ul>
 
           <div className="rc">
-            <div><small>24-hour trial</small><b>GHS 10</b></div>
-            <div><small>30-day plan</small><b>GHS 299</b></div>
+            <div>
+              <small>24-hour trial</small>
+              <b>GHS 10</b>
+            </div>
+            <div>
+              <small>30-day plan</small>
+              <b>GHS 199</b>
+            </div>
           </div>
         </aside>
 
@@ -253,7 +269,10 @@ export default function RegisterPage() {
                   </div>
                   <div className="er" />
                   <div className={`str s${strength}`}>
-                    <i /><i /><i /><i />
+                    <i />
+                    <i />
+                    <i />
+                    <i />
                   </div>
                   <div className="hint">
                     {values.pw
@@ -326,7 +345,7 @@ export default function RegisterPage() {
                       <b>30-day plan</b>
                       <small>30 consecutive days from activation</small>
                     </div>
-                    <strong>GHS 299</strong>
+                    <strong>GHS 199</strong>
                   </label>
                 </div>
 
@@ -337,7 +356,7 @@ export default function RegisterPage() {
                   </div>
                   <div className="t">
                     <span>Total</span>
-                    <span>GHS {plan === 'trial' ? '10' : '299'}.00</span>
+                    <span>GHS {plan === 'trial' ? '10' : '199'}.00</span>
                   </div>
                 </div>
 
@@ -348,11 +367,15 @@ export default function RegisterPage() {
                       Processing payment…
                     </>
                   ) : (
-                    `Pay GHS ${plan === 'trial' ? '10' : '299'} with Paystack`
+                    `Pay GHS ${plan === 'trial' ? '10' : '199'} with Paystack`
                   )}
                 </button>
 
-                <button className="btn g" onClick={() => setStep(0)} disabled={submitting}>
+                <button
+                  className="btn g"
+                  onClick={() => setStep(0)}
+                  disabled={submitting}
+                >
                   ← Back
                 </button>
 
@@ -603,10 +626,18 @@ const REG_STYLES = `
     .reg .pts li:nth-child(n+3) { display: none; }
     .reg .R { padding: 24px; }
   }
+
+  /* Reduced motion: only disable motion-only animations.
+     Keep entry fades and hover transitions working. */
   @media (prefers-reduced-motion: reduce) {
-    .reg *, .reg *::before, .reg *::after {
-      animation: none !important; transition: none !important;
+    .reg .L::after,
+    .reg .sp {
+      animation: none !important;
     }
-    .reg .pts li { opacity: 1; transform: none; }
+    .reg .pts li {
+      opacity: 1;
+      transform: none;
+      animation: none !important;
+    }
   }
 `;
