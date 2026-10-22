@@ -15,6 +15,8 @@ import {
   X,
   ClipboardList,
   Download,
+  ZoomIn,
+  Loader2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -59,7 +61,7 @@ function StatusPill({ status }) {
 }
 
 const inputCls =
-  "block w-full rounded-lg border border-lk bg-transparent px-3 py-2 text-[14px] font-medium text-black transition-colors focus:border-em focus:outline-none focus:ring-[3px] focus:ring-emb/25 placeholder:text-gray-dim";
+  "block w-full rounded-lg border border-lk bg-transparent px-3 py-2 text-[14px] font-medium text-black transition-colors focus:border-em focus:outline-none focus:ring-[3px] focus:ring-emb/25 placeholder:text-gray-dim disabled:opacity-60 disabled:cursor-not-allowed";
 
 /* ============================================================
    Barcode preview modal
@@ -85,7 +87,6 @@ function BarcodeModal({ product, onClose }) {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      // Fallback for cross-origin: open in a new tab so the user can save it
       window.open(product.barcodeImageUrl, "_blank");
     }
   };
@@ -96,7 +97,6 @@ function BarcodeModal({ product, onClose }) {
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="w-full max-w-[560px] overflow-hidden rounded-2xl bg-white">
-        {/* Header */}
         <div className="flex items-start justify-between gap-3 border-b border-lk p-5">
           <div className="min-w-0">
             <h2 className="m-0 truncate text-[18px] font-bold text-black">
@@ -121,7 +121,6 @@ function BarcodeModal({ product, onClose }) {
           </button>
         </div>
 
-        {/* Preview */}
         <div className="grid place-items-center bg-black/[0.02] p-8">
           {product.barcodeImageUrl ? (
             <div className="w-full max-w-[420px] rounded-xl border border-lk bg-white p-6">
@@ -141,7 +140,6 @@ function BarcodeModal({ product, onClose }) {
           )}
         </div>
 
-        {/* Actions */}
         <div className="grid grid-cols-2 gap-3 border-t border-lk p-4">
           <button
             onClick={onClose}
@@ -164,26 +162,172 @@ function BarcodeModal({ product, onClose }) {
 }
 
 /* ============================================================
-   Adjust stock modal
+   Large image preview modal
+   ============================================================ */
+function ImagePreview({ product, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-6"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Preview of ${product.name}`}
+    >
+      <div className="flex max-h-[92vh] w-full max-w-[520px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-lk px-4 py-3">
+          <div className="min-w-0">
+            <b className="block truncate text-[14px] font-bold text-black">
+              {product.name}
+            </b>
+            {product.sku && (
+              <small className="block truncate text-[12px] text-gray-dim">
+                SKU {product.sku}
+              </small>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="grid h-8 w-8 flex-none place-items-center rounded-lg border border-lk bg-transparent text-gray-dim transition-colors hover:border-em hover:text-black"
+            aria-label="Close preview"
+          >
+            <X size={16} strokeWidth={1.8} />
+          </button>
+        </div>
+
+        <div className="grid place-items-center bg-[#fafbf9] p-6">
+          {product.imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={product.imageUrl}
+              alt={product.name}
+              className="max-h-[60vh] w-auto max-w-full rounded-lg object-contain shadow-sm"
+            />
+          ) : (
+            <div className="grid h-[240px] w-[240px] place-items-center rounded-xl bg-black text-[36px] font-extrabold text-emb">
+              {ini(product.name)}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between border-t border-lk px-4 py-3 text-[12px]">
+          <span className="font-mono text-gray-dim">
+            {product.barcode || "—"}
+          </span>
+          <span className="rounded-md bg-black/[0.04] px-2 py-0.5 text-[12px] font-semibold text-black">
+            {product.category}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   ProductThumb — click to open large image preview
+   ============================================================ */
+function ProductThumb({ product }) {
+  const [previewing, setPreviewing] = useState(false);
+  const hasImage = !!product.imageUrl;
+
+  const onClick = (e) => {
+    e.stopPropagation();
+    if (!hasImage) return;
+    setPreviewing(true);
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={hasImage ? `Preview ${product.name}` : product.name}
+        className={`group/thumb relative grid h-9 w-9 flex-none place-items-center overflow-hidden rounded-lg bg-black text-[12px] font-extrabold text-emb ${
+          hasImage ? "cursor-zoom-in" : "cursor-default"
+        }`}
+      >
+        {ini(product.name)}
+
+        {hasImage && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={product.imageUrl}
+            alt={product.name}
+            className="absolute inset-0 h-full w-full bg-white object-contain p-0.5 transition-transform duration-200 group-hover/thumb:scale-105"
+          />
+        )}
+
+        {hasImage && (
+          <span className="pointer-events-none absolute inset-0 grid place-items-center bg-black/0 text-white opacity-0 transition-all group-hover/thumb:bg-black/40 group-hover/thumb:opacity-100">
+            <ZoomIn size={12} strokeWidth={2.2} />
+          </span>
+        )}
+      </button>
+
+      {previewing && (
+        <ImagePreview product={product} onClose={() => setPreviewing(false)} />
+      )}
+    </>
+  );
+}
+
+/* ============================================================
+   Adjust stock modal — with saving state
    ============================================================ */
 function AdjustModal({ product, onClose, onSave }) {
   const [mode, setMode] = useState(product.mode || "in");
   const [qty, setQty] = useState("");
   const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
-  const qtyNum = Number(qty) || 0;
+  const qtyNum = Number(qty);
+  const qtyValid = Number.isFinite(qtyNum) && qtyNum >= 0;
+
   const projected =
     mode === "in"
-      ? product.stock + qtyNum
+      ? product.stock + (qtyValid ? qtyNum : 0)
       : mode === "out"
-      ? Math.max(0, product.stock - qtyNum)
-      : qtyNum;
+      ? Math.max(0, product.stock - (qtyValid ? qtyNum : 0))
+      : qtyValid
+      ? qtyNum
+      : product.stock;
 
-  const canSave = qty !== "" && qtyNum >= 0 && reason.trim();
+  const canSave = qty !== "" && qtyValid && reason.trim() && !saving;
 
-  const submit = () => {
+  const submit = async () => {
     if (!canSave) return;
-    onSave({ mode, qty: qtyNum, reason: reason.trim(), projected });
+    setError("");
+    setSaving(true);
+
+    const res = await onSave({
+      mode,
+      qty: qtyNum,
+      reason: reason.trim(),
+      projected,
+    });
+
+    // Parent returns { ok, error }. On success, it will unmount this modal.
+    // On failure, we keep it open and show the message.
+    if (res && !res.ok) {
+      setError(res.error || "Could not update stock. Try again.");
+      setSaving(false);
+    }
   };
 
   const modes = [
@@ -195,19 +339,24 @@ function AdjustModal({ product, onClose, onSave }) {
   return (
     <div
       className="fixed inset-0 z-10 grid place-items-center bg-black/60 p-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      onClick={(e) =>
+        e.target === e.currentTarget && !saving && onClose()
+      }
     >
       <div className="w-full max-w-[480px] rounded-2xl bg-white p-6">
         <div className="mb-5 flex items-center justify-between">
           <div>
-            <h2 className="m-0 text-[18px] font-bold">Adjust stock</h2>
+            <h2 className="m-0 text-[18px] font-bold text-black">
+              Adjust stock
+            </h2>
             <p className="mt-0.5 text-[13px] text-gray-dim">
               {product.name} · SKU {product.sku}
             </p>
           </div>
           <button
             onClick={onClose}
-            className="grid h-8 w-8 place-items-center rounded-lg border border-lk bg-transparent text-gray-dim transition-colors hover:text-black"
+            disabled={saving}
+            className="grid h-8 w-8 place-items-center rounded-lg border border-lk bg-transparent text-gray-dim transition-colors hover:text-black disabled:opacity-50"
             aria-label="Close"
           >
             <X size={16} strokeWidth={1.8} />
@@ -219,7 +368,7 @@ function AdjustModal({ product, onClose, onSave }) {
             <span className="block text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-dim">
               Current stock
             </span>
-            <b className="mt-0.5 block text-[24px] font-extrabold tracking-[-0.02em]">
+            <b className="mt-0.5 block text-[24px] font-extrabold tracking-[-0.02em] text-black">
               {product.stock}
             </b>
           </div>
@@ -241,7 +390,8 @@ function AdjustModal({ product, onClose, onSave }) {
               <button
                 key={m.key}
                 onClick={() => setMode(m.key)}
-                className={`flex items-center justify-center gap-2 rounded-lg border py-3 text-[13px] font-bold transition-colors ${
+                disabled={saving}
+                className={`flex items-center justify-center gap-2 rounded-lg border py-3 text-[13px] font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
                   active
                     ? "border-black bg-black text-emb"
                     : "border-lk bg-transparent text-gray-dim hover:text-black"
@@ -264,6 +414,7 @@ function AdjustModal({ product, onClose, onSave }) {
             placeholder="0"
             className={`mt-1 ${inputCls}`}
             autoFocus
+            disabled={saving}
           />
         </label>
 
@@ -274,26 +425,37 @@ function AdjustModal({ product, onClose, onSave }) {
             onChange={(e) => setReason(e.target.value)}
             placeholder="e.g. New delivery, damaged, stock count"
             className={`mt-1 ${inputCls}`}
+            disabled={saving}
           />
         </label>
+
+        {error && (
+          <div className="mt-3 rounded-lg border border-black bg-black px-3 py-2 text-[12px] font-semibold text-emb">
+            {error}
+          </div>
+        )}
 
         <div className="mt-5 grid grid-cols-[1fr_2fr] gap-3">
           <button
             onClick={onClose}
-            className="rounded-lg border border-lk bg-transparent py-3 text-[14px] font-semibold text-black transition-colors hover:border-em"
+            disabled={saving}
+            className="rounded-lg border border-lk bg-transparent py-3 text-[14px] font-semibold text-black transition-colors hover:border-em disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             onClick={submit}
             disabled={!canSave}
-            className={`rounded-lg py-3 text-[14px] font-extrabold transition-colors ${
+            className={`flex items-center justify-center gap-2 rounded-lg py-3 text-[14px] font-extrabold transition-colors ${
               canSave
                 ? "border border-black bg-black text-white hover:border-emb hover:text-emb"
                 : "cursor-not-allowed border border-lk bg-lk text-gray-dim opacity-60"
             }`}
           >
-            Update stock
+            {saving && (
+              <Loader2 size={15} strokeWidth={2.2} className="animate-spin" />
+            )}
+            {saving ? "Updating stock…" : "Update stock"}
           </button>
         </div>
       </div>
@@ -312,7 +474,6 @@ export default function InventoryPage() {
   const [moves, setMoves] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [saving, setSaving] = useState(false);
 
   const [q, setQ] = useState("");
   const [catFilter, setCatFilter] = useState("All");
@@ -414,31 +575,25 @@ export default function InventoryPage() {
     return { units, low, out, value };
   }, [items]);
 
-  /* ---------- Adjust stock ---------- */
+  /* ---------- Adjust stock (returns { ok, error }) ---------- */
   const applyAdjust = async ({ mode, qty, reason, projected }) => {
-    if (!adjustTarget) return;
+    if (!adjustTarget) return { ok: false, error: "No product selected." };
 
-    setSaving(true);
+    const nowIso = new Date().toISOString();
 
     const { error } = await supabase
       .from("products")
-      .update({
-        stock: projected,
-        updated_at: new Date().toISOString(),
-      })
+      .update({ stock: projected, updated_at: nowIso })
       .eq("id", adjustTarget.id);
 
-    setSaving(false);
-
     if (error) {
-      alert(error.message);
-      return;
+      return { ok: false, error: error.message };
     }
 
     setItems((list) =>
       list.map((p) =>
         p.id === adjustTarget.id
-          ? { ...p, stock: projected, updatedAt: new Date().toISOString() }
+          ? { ...p, stock: projected, updatedAt: nowIso }
           : p
       )
     );
@@ -458,6 +613,7 @@ export default function InventoryPage() {
     ]);
 
     setAdjustTarget(null);
+    return { ok: true };
   };
 
   /* ---------- Loading / error ---------- */
@@ -659,18 +815,7 @@ export default function InventoryPage() {
                     >
                       <td className="whitespace-nowrap px-4 py-3 text-[14px]">
                         <div className="flex items-center gap-3">
-                          <span className="relative grid h-9 w-9 flex-none place-items-center overflow-hidden rounded-lg bg-black text-[12px] font-extrabold text-emb">
-                            {ini(p.name)}
-                            {p.imageUrl && (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={p.imageUrl}
-                                alt={p.name}
-                                className="absolute inset-0 h-full w-full bg-white object-contain p-0.5"
-                                onError={(e) => e.currentTarget.remove()}
-                              />
-                            )}
-                          </span>
+                          <ProductThumb product={p} />
                           <div>
                             <div className="font-semibold text-black">
                               {p.name}
@@ -688,6 +833,7 @@ export default function InventoryPage() {
                             onClick={() => setBarcodeTarget(p)}
                             className="group flex flex-col items-start gap-1 rounded-md p-1 transition-colors hover:bg-black/[0.04]"
                             title="View barcode"
+                            type="button"
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
@@ -774,9 +920,10 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {/* Adjust modal */}
+      {/* Adjust modal — includes its own saving state */}
       {adjustTarget && (
         <AdjustModal
+          key={`${adjustTarget.id}-${adjustTarget.mode}`}
           product={adjustTarget}
           onClose={() => setAdjustTarget(null)}
           onSave={applyAdjust}

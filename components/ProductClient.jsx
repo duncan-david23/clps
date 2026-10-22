@@ -13,6 +13,7 @@ import {
   ArrowUpDown,
   Upload,
   ImageIcon,
+  ZoomIn,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -138,11 +139,14 @@ function makeSku(bizName) {
 /* ============================================================
    Field
    ============================================================ */
-function Field({ label, children }) {
+function Field({ label, hint, children }) {
   return (
     <label className="block text-[12px] font-semibold text-gray-dim">
       {label}
       <div className="mt-1">{children}</div>
+      {hint && (
+        <p className="mt-1 text-[11px] font-normal text-gray-dim">{hint}</p>
+      )}
     </label>
   );
 }
@@ -244,6 +248,123 @@ function ImageUploader({ value, onChange, folder = "product-images" }) {
 }
 
 /* ============================================================
+   ImagePreview — large image modal
+   ============================================================ */
+function ImagePreview({ product, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-bg/80 p-6 backdrop-blur-sm"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Preview of ${product.name}`}
+    >
+      <div className="flex max-h-[92vh] w-full max-w-[520px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-lk px-4 py-3">
+          <div className="min-w-0">
+            <b className="block truncate text-[14px] font-bold">
+              {product.name}
+            </b>
+            {product.description && (
+              <small className="block truncate text-[12px] text-gray-dim">
+                {product.description}
+              </small>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="grid h-8 w-8 flex-none place-items-center rounded-lg border border-lk bg-transparent text-gray-dim transition-colors hover:border-em hover:text-bg"
+            aria-label="Close preview"
+          >
+            <X size={16} strokeWidth={1.8} />
+          </button>
+        </div>
+
+        <div className="grid place-items-center bg-[#fafbf9] p-6">
+          {product.image_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={product.image_url}
+              alt={product.name}
+              className="max-h-[60vh] w-auto max-w-full rounded-lg object-contain shadow-sm"
+            />
+          ) : (
+            <div className="grid h-[240px] w-[240px] place-items-center rounded-xl bg-emd text-[36px] font-extrabold text-emb">
+              {ini(product.name)}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between border-t border-lk px-4 py-3 text-[12px]">
+          <span className="font-mono text-gray-dim">{product.sku}</span>
+          <span className="rounded-md bg-bg/[0.04] px-2 py-0.5 text-[12px] font-semibold">
+            {product.category}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   ProductThumb — click to open preview
+   ============================================================ */
+function ProductThumb({ product, size = "md" }) {
+  const [previewing, setPreviewing] = useState(false);
+
+  const sizeCls =
+    size === "lg" ? "h-11 w-11 text-[15px]" : "h-10 w-10 text-[12px]";
+
+  const hasImage = !!product.image_url;
+
+  const onClick = (e) => {
+    e.stopPropagation();
+    if (!hasImage) return;
+    setPreviewing(true);
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={hasImage ? `Preview ${product.name}` : product.name}
+        className={`group/thumb relative grid ${sizeCls} flex-none place-items-center overflow-hidden rounded-lg bg-emd font-extrabold text-emb ${
+          hasImage ? "cursor-zoom-in" : "cursor-default"
+        }`}
+      >
+        {ini(product.name)}
+
+        {hasImage && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={product.image_url}
+            alt={product.name}
+            className="absolute inset-0 h-full w-full bg-white object-contain p-1 transition-transform duration-200 group-hover/thumb:scale-105"
+          />
+        )}
+
+        {hasImage && (
+          <span className="pointer-events-none absolute inset-0 grid place-items-center bg-bg/0 text-white opacity-0 transition-all group-hover/thumb:bg-bg/40 group-hover/thumb:opacity-100">
+            <ZoomIn size={14} strokeWidth={2.2} />
+          </span>
+        )}
+      </button>
+
+      {previewing && <ImagePreview product={product} onClose={() => setPreviewing(false)} />}
+    </>
+  );
+}
+
+/* ============================================================
    ProductModal
    ============================================================ */
 function ProductModal({
@@ -257,18 +378,21 @@ function ProductModal({
   const editing = !!initial;
 
   const [form, setForm] = useState(
-    initial || {
-      name: "",
-      sku: makeSku(businessName),
-      barcode: "",
-      barcode_image_url: "",
-      category_id: "",
-      cost: "",
-      price: "",
-      stock: "",
-      low: "",
-      image_url: "",
-    }
+    initial
+      ? { ...initial, description: initial.description || "" }
+      : {
+          name: "",
+          description: "",
+          sku: makeSku(businessName),
+          barcode: "",
+          barcode_image_url: "",
+          category_id: "",
+          cost: "",
+          price: "",
+          stock: "",
+          low: "",
+          image_url: "",
+        }
   );
 
   const [skuError, setSkuError] = useState("");
@@ -341,6 +465,7 @@ function ProductModal({
         barcode: code,
         category_id: form.category_id,
         barcode_image_url: barcodeUrl,
+        description: form.description.trim() || null,
       });
     } catch (e) {
       setSaveError(e.message || "Save failed.");
@@ -390,6 +515,25 @@ function ProductModal({
               placeholder="e.g. Coca-Cola 500ml"
               className={inputCls}
             />
+          </Field>
+        </div>
+
+        <div className="mt-3">
+          <Field
+            label="Description"
+            hint="Optional. Shown in product details and on receipts if you enable it."
+          >
+            <textarea
+              value={form.description}
+              onChange={(e) => set("description", e.target.value)}
+              placeholder="e.g. Chilled 500ml bottle of Coca-Cola"
+              rows={3}
+              maxLength={500}
+              className="block w-full resize-none rounded-lg border border-lk bg-transparent px-3 py-2 text-[14px] font-medium text-bg transition-colors focus:border-em focus:outline-none focus:ring-[3px] focus:ring-emb/25"
+            />
+            <div className="mt-1 flex justify-end text-[11px] text-gray-dim">
+              {form.description.length}/500
+            </div>
           </Field>
         </div>
 
@@ -625,6 +769,9 @@ export default function ProductsPage() {
   const [delTarget, setDelTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
+  const PRODUCT_FIELDS =
+    "id, name, description, sku, barcode, barcode_image_url, category_id, cost_price, selling_price, stock, low_stock_threshold, image_url";
+
   async function loadAll() {
     setLoading(true);
     setLoadError("");
@@ -658,9 +805,7 @@ export default function ProductsPage() {
 
     const { data: prodsData, error: prodsErr } = await supabase
       .from("products")
-      .select(
-        "id, name, sku, barcode, barcode_image_url, category_id, cost_price, selling_price, stock, low_stock_threshold, image_url"
-      )
+      .select(PRODUCT_FIELDS)
       .order("name");
 
     if (prodsErr) {
@@ -674,6 +819,7 @@ export default function ProductsPage() {
       (prodsData || []).map((p) => ({
         id: p.id,
         name: p.name,
+        description: p.description || "",
         sku: p.sku,
         barcode: p.barcode,
         barcode_image_url: p.barcode_image_url,
@@ -711,7 +857,8 @@ export default function ProductsPage() {
         if (
           !p.name.toLowerCase().includes(t) &&
           !(p.sku || "").toLowerCase().includes(t) &&
-          !(p.barcode || "").includes(q)
+          !(p.barcode || "").includes(q) &&
+          !(p.description || "").toLowerCase().includes(t)
         )
           return false;
       }
@@ -741,6 +888,7 @@ export default function ProductsPage() {
         .from("products")
         .insert({
           name: data.name,
+          description: data.description,
           sku: data.sku,
           barcode: data.barcode,
           barcode_image_url: data.barcode_image_url,
@@ -751,9 +899,7 @@ export default function ProductsPage() {
           low_stock_threshold: data.low,
           image_url: data.image_url || null,
         })
-        .select(
-          "id, name, sku, barcode, barcode_image_url, category_id, cost_price, selling_price, stock, low_stock_threshold, image_url"
-        )
+        .select(PRODUCT_FIELDS)
         .single();
 
       if (error) throw new Error(error.message);
@@ -767,6 +913,7 @@ export default function ProductsPage() {
           {
             id: inserted.id,
             name: inserted.name,
+            description: inserted.description || "",
             sku: inserted.sku,
             barcode: inserted.barcode,
             barcode_image_url: inserted.barcode_image_url,
@@ -785,6 +932,7 @@ export default function ProductsPage() {
         .from("products")
         .update({
           name: data.name,
+          description: data.description,
           sku: data.sku,
           barcode: data.barcode,
           barcode_image_url: data.barcode_image_url,
@@ -796,9 +944,7 @@ export default function ProductsPage() {
           image_url: data.image_url || null,
         })
         .eq("id", modal.product.id)
-        .select(
-          "id, name, sku, barcode, barcode_image_url, category_id, cost_price, selling_price, stock, low_stock_threshold, image_url"
-        )
+        .select(PRODUCT_FIELDS)
         .single();
 
       if (error) throw new Error(error.message);
@@ -813,6 +959,7 @@ export default function ProductsPage() {
               ? {
                   id: updated.id,
                   name: updated.name,
+                  description: updated.description || "",
                   sku: updated.sku,
                   barcode: updated.barcode,
                   barcode_image_url: updated.barcode_image_url,
@@ -849,9 +996,20 @@ export default function ProductsPage() {
 
   const exportCsv = () => {
     const rows = [
-      ["Name", "SKU", "Barcode", "Category", "Cost", "Price", "Stock", "Low"],
+      [
+        "Name",
+        "Description",
+        "SKU",
+        "Barcode",
+        "Category",
+        "Cost",
+        "Price",
+        "Stock",
+        "Low",
+      ],
       ...filtered.map((p) => [
         p.name,
+        p.description || "",
         p.sku,
         p.barcode,
         p.category,
@@ -973,7 +1131,7 @@ export default function ProductsPage() {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search products, SKU or barcode..."
+              placeholder="Search products, SKU, barcode or description..."
               className="w-full border-0 bg-transparent text-[14px] outline-none"
             />
           </div>
@@ -1093,24 +1251,20 @@ export default function ProductsPage() {
                         key={p.id}
                         className="border-t border-lk transition-colors hover:bg-bg/[0.03]"
                       >
-                        <td className="whitespace-nowrap px-4 py-3 text-[14px]">
+                        <td className="px-4 py-3 text-[14px]">
                           <div className="flex items-center gap-3">
-                            <span className="relative grid h-10 w-10 flex-none place-items-center overflow-hidden rounded-lg bg-emd text-[12px] font-extrabold text-emb">
-                              {ini(p.name)}
-                              {p.image_url && (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  src={p.image_url}
-                                  alt={p.name}
-                                  className="absolute inset-0 h-full w-full bg-white object-contain p-1"
-                                />
-                              )}
-                            </span>
-                            <div>
+                            <ProductThumb product={p} size="md" />
+                            <div className="min-w-0">
                               <div className="font-semibold">{p.name}</div>
-                              <div className="font-mono text-[11px] text-gray-dim">
-                                {p.barcode}
-                              </div>
+                              {p.description ? (
+                                <div className="line-clamp-1 max-w-[340px] text-[11px] text-gray-dim">
+                                  {p.description}
+                                </div>
+                              ) : (
+                                <div className="font-mono text-[11px] text-gray-dim">
+                                  {p.barcode}
+                                </div>
+                              )}
                             </div>
                           </div>
                         </td>
@@ -1176,23 +1330,18 @@ export default function ProductsPage() {
                       className="group rounded-xl border border-lk p-4 transition-all hover:-translate-y-px hover:border-em hover:shadow-[0_4px_16px_-8px_rgba(31,174,122,0.35)]"
                     >
                       <div className="mb-3 flex items-start justify-between">
-                        <span className="relative grid h-11 w-11 place-items-center overflow-hidden rounded-xl bg-emd text-[15px] font-extrabold text-emb">
-                          {ini(p.name)}
-                          {p.image_url && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={p.image_url}
-                              alt={p.name}
-                              className="absolute inset-0 h-full w-full bg-white object-contain p-1"
-                            />
-                          )}
-                        </span>
+                        <ProductThumb product={p} size="lg" />
                         <StatusPill status={status} />
                       </div>
                       <b className="block truncate text-[14px]">{p.name}</b>
                       <small className="block text-[12px] text-gray-dim">
                         {p.category} · {p.sku}
                       </small>
+                      {p.description && (
+                        <p className="mt-1.5 line-clamp-2 text-[12px] leading-[1.4] text-gray-dim">
+                          {p.description}
+                        </p>
+                      )}
                       <div className="mt-3 flex items-baseline justify-between">
                         <span className="text-[16px] font-extrabold">
                           {fm(p.price)}
