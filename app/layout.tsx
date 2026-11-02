@@ -12,7 +12,9 @@ const manrope = Manrope({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://pos.claukk.com"),
-
+verification: {
+  google: "c1eoo3_GTJZ68T97v82O6j9dChDdPbhfOttJKtSPwPA",
+},
   title: {
     default: "ClaukkPOS | POS & Inventory Management Software",
     template: "%s | ClaukkPOS",
