@@ -630,14 +630,14 @@ export default function Sidebar() {
       )}
 
       {showStartShift && (
-        <button
-          onClick={() => setShowShiftModal(true)}
-          className="fixed bottom-5 right-5 z-[9] flex items-center gap-2 rounded-full border border-emb bg-emb px-5 py-3 text-[13px] font-extrabold text-bg shadow-lg shadow-emd/30 transition-transform hover:scale-105"
-          title="Sign in with a staff code"
-        >
-          <PlayCircle size={18} strokeWidth={2.2} />
-          Start shift
-        </button>
+       <button
+  onClick={() => setShowShiftModal(true)}
+  className="fixed bottom-6 left-1/2 z-[9] -translate-x-1/2 flex items-center gap-2 rounded-full border border-emb bg-emb px-5 py-3 text-[13px] font-extrabold text-bg shadow-lg shadow-emd/30 transition-transform hover:scale-105"
+  title="Sign in with a staff code"
+>
+  <PlayCircle size={18} strokeWidth={2.2} />
+  Start shift
+</button>
       )}
     </>
   );
