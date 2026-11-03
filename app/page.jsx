@@ -3,31 +3,45 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 
 export const metadata = {
-  title: 'ClaukkPOS — Point of sale you pay for by the day',
+  title: {
+    absolute: 'ClaukkPOS | Sell Smarter. Manage Better. Grow Faster.',
+  },
+
   description:
-    'ClaukkPOS: POS, inventory and sales management for retail. GHS 10 per business day or GHS 199 for 30 days.',
+    'Run your business with ClaukkPOS — a powerful POS and inventory management system. Process sales, track stock, scan barcodes, manage employees and accept cash or mobile money, all from one platform.',
+
   keywords: [
-    'POS',
-    'point of sale',
-    'inventory',
-    'retail',
-    'Ghana',
-    'mobile money',
-    'Paystack',
     'ClaukkPOS',
+    'POS software',
+    'Point of sale system',
+    'Inventory management software',
+    'Retail POS software',
+    'Stock management',
+    'Sales management',
+    'Barcode scanning POS',
+    'POS software Ghana',
+    'Inventory management Ghana',
+    'Mobile money POS',
   ],
+
   openGraph: {
-    title: 'ClaukkPOS — Point of sale you pay for by the day',
+    title: 'ClaukkPOS | Sell Smarter. Manage Better. Grow Faster.',
     description:
-      'POS, inventory and sales management for modern retail. Try it for GHS 10 a day.',
+      'Simplify your business operations with smarter sales, inventory, barcode scanning, staff management and mobile money payments.',
     type: 'website',
     siteName: 'ClaukkPOS',
+    url: 'https://pos.claukk.com',
   },
+
   twitter: {
     card: 'summary_large_image',
-    title: 'ClaukkPOS — Point of sale you pay for by the day',
+    title: 'ClaukkPOS | Sell Smarter. Manage Better. Grow Faster.',
     description:
-      'POS, inventory and sales management for modern retail. Try it for GHS 10 a day.',
+      'Manage sales, inventory, staff and payments with ClaukkPOS. Everything your retail business needs in one platform.',
+  },
+
+  alternates: {
+    canonical: 'https://pos.claukk.com',
   },
 };
 

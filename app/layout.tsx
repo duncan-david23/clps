@@ -15,10 +15,10 @@ export const metadata: Metadata = {
 verification: {
   google: "c1eoo3_GTJZ68T97v82O6j9dChDdPbhfOttJKtSPwPA",
 },
-  title: {
-    default: "ClaukkPOS | POS & Inventory Management Software",
-    template: "%s | ClaukkPOS",
-  },
+ title: {
+  default: "ClaukkPOS | Sell Smarter. Manage Better. Grow Faster.",
+  template: "%s | ClaukkPOS",
+},
 
   description:
     "ClaukkPOS is a modern point-of-sale and inventory management system that helps businesses manage sales, products, stock, employees, barcodes and daily operations from one platform.",
