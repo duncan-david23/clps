@@ -14,6 +14,8 @@ import {
   BarChart3,
   Download,
   Calendar,
+  Store,
+  Globe,
 } from "lucide-react";
 import {
   AreaChart,
@@ -195,7 +197,7 @@ export default function ReportsPage() {
       const { data: saleRows, error: salesErr } = await supabase
         .from("sales")
         .select(
-          "id, receipt_no, total, subtotal, discount, tax, payment_method, payment_ref, status, created_at, staff_id"
+          "id, receipt_no, total, subtotal, discount, tax, payment_method, payment_ref, status, created_at, staff_id, customer_type"
         )
         .gte("created_at", since)
         .order("created_at", { ascending: false });
@@ -247,6 +249,7 @@ export default function ReportsPage() {
           created_at: s.created_at,
           staff_id: s.staff_id,
           staff_name: staffMap.get(s.staff_id)?.name || "Owner",
+          customer_type: s.customer_type || "walk_in",
           items: itemsBySale.get(s.id) || [],
         }))
       );
@@ -338,7 +341,35 @@ export default function ReportsPage() {
       (a, b) => b.total - a.total
     );
 
-    // Top products
+    // Customer type breakdown
+    const customerMap = new Map();
+    paid.forEach((s) => {
+      const key = s.customer_type === "online" ? "online" : "walk_in";
+      const existing =
+        customerMap.get(key) ||
+        {
+          key,
+          label: key === "online" ? "Online" : "Walk-in",
+          total: 0,
+          count: 0,
+          items: 0,
+        };
+      existing.total += s.total;
+      existing.count += 1;
+      existing.items += s.items.reduce((sum, it) => sum + (it.quantity || 0), 0);
+      customerMap.set(key, existing);
+    });
+    const customerBreakdown = ["walk_in", "online"]
+      .map((k) => customerMap.get(k))
+      .filter(Boolean);
+    const customerTotalRevenue = customerBreakdown.reduce(
+      (a, c) => a + c.total,
+      0
+    );
+    const customerShare = (v) =>
+      customerTotalRevenue > 0 ? (v / customerTotalRevenue) * 100 : 0;
+
+    // Top products — all products sold, ranked two ways
     const prodMap = new Map();
     paid.forEach((s) => {
       s.items.forEach((it) => {
@@ -354,7 +385,11 @@ export default function ReportsPage() {
         prodMap.set(key, existing);
       });
     });
-    const topProducts = Array.from(prodMap.values())
+    const allProducts = Array.from(prodMap.values());
+    const topByUnits = [...allProducts]
+      .sort((a, b) => b.units - a.units)
+      .slice(0, 10);
+    const topByRevenue = [...allProducts]
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 10);
 
@@ -393,7 +428,7 @@ export default function ReportsPage() {
       .filter((s) => s.count > 0)
       .sort((a, b) => b.revenue - a.revenue);
 
-    // Time series for chart
+    // Time series
     const days =
       cfg?.key === "today"
         ? 1
@@ -412,11 +447,7 @@ export default function ReportsPage() {
       const bucketDate = new Date(
         now.getTime() - (bucketCount - 1 - i) * bucketSize * 86400000
       );
-      return {
-        date: bucketDate,
-        revenue: 0,
-        transactions: 0,
-      };
+      return { date: bucketDate, revenue: 0, transactions: 0 };
     });
 
     paid.forEach((s) => {
@@ -438,7 +469,7 @@ export default function ReportsPage() {
       Transactions: b.transactions,
     }));
 
-    // Inventory summary
+    // Inventory
     const totalStockValue = products.reduce(
       (a, p) => a + p.cost * p.stock,
       0
@@ -461,7 +492,11 @@ export default function ReportsPage() {
       revenueChange: pctChange(revenue, prevRevenue),
       transactionsChange: pctChange(transactions, prevTransactions),
       paymentBreakdown,
-      topProducts,
+      customerBreakdown,
+      customerTotalRevenue,
+      customerShare,
+      topByUnits,
+      topByRevenue,
       staffPerformance,
       timeSeries,
       inventory: {
@@ -492,9 +527,28 @@ export default function ReportsPage() {
       ["Items sold", data.itemsSold],
       ["Average order value", data.avgOrder.toFixed(2)],
       [],
-      ["Top products"],
+      ["Customer type breakdown"],
+      ["Type", "Sales", "Items", "Revenue", "% of revenue"],
+      ...data.customerBreakdown.map((c) => [
+        c.label,
+        c.count,
+        c.items,
+        c.total.toFixed(2),
+        data.customerShare(c.total).toFixed(1) + "%",
+      ]),
+      [],
+      ["Top products by quantity"],
       ["Name", "SKU", "Units", "Revenue"],
-      ...data.topProducts.map((p) => [
+      ...data.topByUnits.map((p) => [
+        p.name,
+        p.sku,
+        p.units,
+        p.revenue.toFixed(2),
+      ]),
+      [],
+      ["Top products by revenue"],
+      ["Name", "SKU", "Units", "Revenue"],
+      ...data.topByRevenue.map((p) => [
         p.name,
         p.sku,
         p.units,
@@ -550,9 +604,6 @@ export default function ReportsPage() {
 
   return (
     <>
-      {/* ============================================================
-          PRINT STYLES
-          ============================================================ */}
       <style jsx global>{`
         @media print {
           @page {
@@ -592,7 +643,7 @@ export default function ReportsPage() {
       `}</style>
 
       <div className="flex-1 overflow-auto px-4 pb-12 pt-7 md:px-8">
-        {/* ===== Header (hidden in print) ===== */}
+        {/* Header */}
         <div className="no-print mb-6 flex flex-wrap items-end justify-between gap-4">
           <div>
             <h2 className="m-0 text-[24px] font-extrabold tracking-[-0.02em] text-black">
@@ -621,7 +672,7 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        {/* ===== Range picker (hidden in print) ===== */}
+        {/* Range picker */}
         <div className="no-print mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-lk bg-white p-4">
           <Calendar size={16} strokeWidth={1.8} className="text-gray-dim" />
           <span className="text-[13px] font-semibold text-gray-dim">
@@ -645,11 +696,8 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        {/* ============================================================
-            PRINTABLE CONTENT
-            ============================================================ */}
         <div id="report-print-root" ref={printRef}>
-          {/* Report header — visible in print */}
+          {/* Report header */}
           <div className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b border-lk pb-5">
             <div>
               <h1 className="m-0 text-[22px] font-extrabold tracking-[-0.02em] text-black">
@@ -720,7 +768,7 @@ export default function ReportsPage() {
           {/* Revenue chart */}
           <Card
             title="Revenue over time"
-            subtitle={`Daily revenue and transaction count across the selected period.`}
+            subtitle="Daily revenue and transaction count across the selected period."
             className="print-break mb-6"
           >
             <div className="h-[280px] w-full">
@@ -802,6 +850,183 @@ export default function ReportsPage() {
             </div>
           </Card>
 
+          {/* Customer type breakdown */}
+          <Card
+            title="Sales by customer type"
+            subtitle="Walk-in vs online revenue split for the period."
+            className="print-break mb-6"
+          >
+            {data.customerBreakdown.length === 0 ? (
+              <p className="py-6 text-center text-[13px] text-gray-dim">
+                No paid sales in this period.
+              </p>
+            ) : (
+              <>
+                {/* Stacked bar */}
+                <div className="mb-5 flex h-3 w-full overflow-hidden rounded-full bg-lk">
+                  {data.customerBreakdown.map((c, i) => {
+                    const pct = data.customerShare(c.total);
+                    if (pct <= 0) return null;
+                    return (
+                      <div
+                        key={c.key}
+                        className="h-full"
+                        style={{
+                          width: `${pct}%`,
+                          background:
+                            c.key === "online"
+                              ? "#1fae7a"
+                              : "#3fe0a6",
+                        }}
+                        title={`${c.label} · ${pct.toFixed(1)}%`}
+                      />
+                    );
+                  })}
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {data.customerBreakdown.map((c) => {
+                    const Icon = c.key === "online" ? Globe : Store;
+                    const pct = data.customerShare(c.total);
+                    return (
+                      <div
+                        key={c.key}
+                        className="rounded-xl border border-lk p-4"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <span
+                              className={`grid h-9 w-9 flex-none place-items-center rounded-lg ${
+                                c.key === "online"
+                                  ? "bg-em text-white"
+                                  : "bg-emd text-emb"
+                              }`}
+                            >
+                              <Icon size={16} strokeWidth={2} />
+                            </span>
+                            <div>
+                              <b className="block text-[14px] font-bold text-black">
+                                {c.label}
+                              </b>
+                              <span className="text-[11px] text-gray-dim">
+                                {c.count} sale{c.count === 1 ? "" : "s"} ·{" "}
+                                {c.items} item{c.items === 1 ? "" : "s"}
+                              </span>
+                            </div>
+                          </div>
+                          <b className="text-[13px] font-extrabold tabular-nums text-black">
+                            {pct.toFixed(1)}%
+                          </b>
+                        </div>
+                        <b className="mt-3 block text-[22px] font-extrabold tracking-[-0.02em] tabular-nums text-black">
+                          {fm(c.total)}
+                        </b>
+                        <span className="mt-0.5 block text-[12px] text-gray-dim">
+                          Revenue
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </Card>
+
+          {/* Top products — quantity and revenue */}
+          <div className="print-break mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <Card
+              title="Top products by quantity"
+              subtitle="What moves fastest."
+            >
+              {data.topByUnits.length === 0 ? (
+                <p className="py-6 text-center text-[13px] text-gray-dim">
+                  No products sold in this period.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr>
+                        {["#", "Product", "Units", "Revenue"].map((h) => (
+                          <th
+                            key={h}
+                            className="whitespace-nowrap border-b border-lk px-2.5 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-dim"
+                          >
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.topByUnits.map((p, i) => (
+                        <tr key={p.name} className="border-t border-lk">
+                          <td className="whitespace-nowrap px-2.5 py-2.5 text-[13px] tabular-nums text-gray-dim">
+                            {i + 1}
+                          </td>
+                          <td className="px-2.5 py-2.5 text-[13px] font-semibold text-black">
+                            {p.name}
+                          </td>
+                          <td className="whitespace-nowrap px-2.5 py-2.5 text-[13px] font-extrabold tabular-nums text-emb">
+                            {p.units}
+                          </td>
+                          <td className="whitespace-nowrap px-2.5 py-2.5 text-[12px] tabular-nums text-gray-dim">
+                            {fm(p.revenue)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+
+            <Card
+              title="Top products by revenue"
+              subtitle="What earns the most."
+            >
+              {data.topByRevenue.length === 0 ? (
+                <p className="py-6 text-center text-[13px] text-gray-dim">
+                  No products sold in this period.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr>
+                        {["#", "Product", "Revenue", "Units"].map((h) => (
+                          <th
+                            key={h}
+                            className="whitespace-nowrap border-b border-lk px-2.5 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-dim"
+                          >
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.topByRevenue.map((p, i) => (
+                        <tr key={p.name} className="border-t border-lk">
+                          <td className="whitespace-nowrap px-2.5 py-2.5 text-[13px] tabular-nums text-gray-dim">
+                            {i + 1}
+                          </td>
+                          <td className="px-2.5 py-2.5 text-[13px] font-semibold text-black">
+                            {p.name}
+                          </td>
+                          <td className="whitespace-nowrap px-2.5 py-2.5 text-[13px] font-extrabold tabular-nums text-emb">
+                            {fm(p.revenue)}
+                          </td>
+                          <td className="whitespace-nowrap px-2.5 py-2.5 text-[12px] tabular-nums text-gray-dim">
+                            {p.units}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+          </div>
+
           {/* Payment methods + staff performance */}
           <div className="print-break mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
             <Card
@@ -858,8 +1083,7 @@ export default function ReportsPage() {
                           <span
                             className="h-3 w-3 flex-none rounded-sm"
                             style={{
-                              background:
-                                PIE_COLORS[i % PIE_COLORS.length],
+                              background: PIE_COLORS[i % PIE_COLORS.length],
                             }}
                           />
                           <span className="flex-1 truncate text-[13px] font-semibold text-black">
@@ -879,10 +1103,7 @@ export default function ReportsPage() {
               </div>
             </Card>
 
-            <Card
-              title="Staff performance"
-              subtitle="Revenue by cashier."
-            >
+            <Card title="Staff performance" subtitle="Revenue by cashier.">
               {data.staffPerformance.length === 0 ? (
                 <p className="py-4 text-center text-[13px] text-gray-dim">
                   No staff sales in this period.
@@ -916,60 +1137,6 @@ export default function ReportsPage() {
             </Card>
           </div>
 
-          {/* Top products */}
-          <Card
-            title="Top products"
-            subtitle="Best sellers by revenue."
-            className="print-break mb-6"
-          >
-            {data.topProducts.length === 0 ? (
-              <p className="py-6 text-center text-[13px] text-gray-dim">
-                No products sold in this period.
-              </p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse">
-                  <thead>
-                    <tr>
-                      {["#", "Product", "SKU", "Units", "Revenue"].map((h) => (
-                        <th
-                          key={h}
-                          className="whitespace-nowrap border-b border-lk px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-dim"
-                        >
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.topProducts.map((p, i) => (
-                      <tr
-                        key={p.name}
-                        className="border-t border-lk"
-                      >
-                        <td className="whitespace-nowrap px-3 py-2.5 text-[13px] text-gray-dim tabular-nums">
-                          {i + 1}
-                        </td>
-                        <td className="px-3 py-2.5 text-[14px] font-semibold text-black">
-                          {p.name}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-2.5 text-[13px] text-gray-dim">
-                          {p.sku || "—"}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-2.5 text-[14px] font-semibold text-black tabular-nums">
-                          {p.units}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-2.5 text-[14px] font-extrabold text-emb tabular-nums">
-                          {fm(p.revenue)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-
           {/* Inventory status */}
           <div className="print-break mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <Metric
@@ -1002,7 +1169,7 @@ export default function ReportsPage() {
             />
           </div>
 
-          {/* Sales summary table — extra detail */}
+          {/* Sales summary */}
           <Card
             title="Sales summary"
             subtitle="Detailed totals for the selected period."
@@ -1045,7 +1212,7 @@ export default function ReportsPage() {
             </div>
           </Card>
 
-          {/* Print footer */}
+          {/* Footer */}
           <div className="mt-8 border-t border-lk pt-4 text-center text-[11px] text-gray-dim">
             <p className="m-0">
               {bizName} · Report generated by ClaukkPOS on{" "}

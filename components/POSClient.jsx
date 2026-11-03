@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ScanLine, Minus, Plus, Check, Keyboard, Camera } from "lucide-react";
+import { ScanLine, Minus, Plus, Check, Keyboard, Camera, Store, Globe } from "lucide-react";
 import {
   MultiFormatReader,
   BinaryBitmap,
@@ -30,7 +30,7 @@ const ini = (n) =>
     .slice(0, 2);
 
 /* ============================================================
-   Sound — "drop in the cart" for success, muted buzz for error
+   Sound
    ============================================================ */
 let _audioCtx = null;
 
@@ -62,34 +62,27 @@ function beep(ok) {
     const now = ctx.currentTime;
 
     if (ok) {
-      // Classic barcode-scanner beep:
-      // a single sharp tone around 2000 Hz lasting ~70ms.
       const osc = ctx.createOscillator();
       osc.type = "sine";
       osc.frequency.setValueAtTime(2000, now);
-
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, now);
-      g.gain.exponentialRampToValueAtTime(0.35, now + 0.005);  // quick attack
-      g.gain.setValueAtTime(0.35, now + 0.06);                  // hold flat
-      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.075); // clean release
-
+      g.gain.exponentialRampToValueAtTime(0.35, now + 0.005);
+      g.gain.setValueAtTime(0.35, now + 0.06);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.075);
       osc.connect(g);
       g.connect(ctx.destination);
       osc.start(now);
       osc.stop(now + 0.08);
     } else {
-      // Distinct low "error" tone — same style, lower pitch.
       const osc = ctx.createOscillator();
       osc.type = "sine";
       osc.frequency.setValueAtTime(600, now);
-
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, now);
       g.gain.exponentialRampToValueAtTime(0.3, now + 0.005);
       g.gain.setValueAtTime(0.3, now + 0.1);
       g.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
-
       osc.connect(g);
       g.connect(ctx.destination);
       osc.start(now);
@@ -101,7 +94,7 @@ function beep(ok) {
 }
 
 /* ============================================================
-   EAN-13 for receipt
+   EAN-13
    ============================================================ */
 const L7 = [
   "0001101","0011001","0010011","0111101","0100011",
@@ -173,6 +166,14 @@ function Receipt({ r, biz, logo, id = "rcpt" }) {
         </b>
         <span className="text-gray-dim">Cashier</span>
         <b className="text-right font-semibold">{r.cashier}</b>
+        {r.customer_type && (
+          <>
+            <span className="text-gray-dim">Customer</span>
+            <b className="text-right font-semibold">
+              {r.customer_type === "online" ? "Online" : "Walk-in"}
+            </b>
+          </>
+        )}
       </div>
 
       <div className="border-b border-dashed border-lk py-2">
@@ -247,7 +248,7 @@ function CartThumb({ product }) {
   const showImg = product.image_url && !failed;
 
   return (
-    <div className="grid h-10 w-10 flex-none place-items-center overflow-hidden rounded-lg bg-white/5">
+    <div className="grid h-8 w-8 flex-none place-items-center overflow-hidden rounded-md bg-white/5 md:h-10 md:w-10 md:rounded-lg">
       {showImg ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -259,7 +260,7 @@ function CartThumb({ product }) {
           onError={() => setFailed(true)}
         />
       ) : (
-        <span className="text-[11px] font-extrabold text-emb">
+        <span className="text-[10px] font-extrabold text-emb md:text-[11px]">
           {ini(product.name)}
         </span>
       )}
@@ -689,7 +690,7 @@ function ScanModal({ onClose, onDetect }) {
 }
 
 /* ============================================================
-   Checkout modal
+   Checkout modal — discount + customer type
    ============================================================ */
 function CheckoutModal({
   lines,
@@ -707,12 +708,23 @@ function CheckoutModal({
   const [stage, setStage] = useState(0);
   const [pay, setPay] = useState(null);
   const [cash, setCash] = useState("");
+  const [discountInput, setDiscountInput] = useState("");
+  const [customerType, setCustomerType] = useState("walk_in");
   const [receipt, setReceipt] = useState(null);
   const [paystackBusy, setPaystackBusy] = useState(false);
   const [paystackError, setPaystackError] = useState("");
   const timerRef = useRef(null);
 
-  const totalNum = Number(total) || 0;
+  const subtotal = Number(total) || 0;
+
+  const parsedDiscount = (() => {
+    if (discountInput === "") return 0;
+    const n = Number(discountInput);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.min(n, Math.max(0, subtotal - 0.01));
+  })();
+
+  const totalNum = Math.max(0, subtotal - parsedDiscount);
   const cashNum = Number(cash) || 0;
 
   const cashEnabled = paymentMethods?.includes("cash");
@@ -730,13 +742,10 @@ function CheckoutModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paymentMethods]);
 
-  const completeCash = () => {
-    if (cashNum < totalNum) return alert("Enter the full cash amount");
-
+  const buildReceipt = (method, pays, ref = null) => {
     const d = new Date();
-    const r = {
-      no:
-        "#INV-" + String(1285 + Math.floor(Math.random() * 100)).padStart(6, "0"),
+    return {
+      no: "#INV-" + String(1285 + Math.floor(Math.random() * 100)).padStart(6, "0"),
       date: d.toLocaleDateString("en-GB", {
         day: "2-digit",
         month: "short",
@@ -745,37 +754,50 @@ function CheckoutModal({
       time: d.toLocaleTimeString("en", { hour: "2-digit", minute: "2-digit" }),
       cashier: cashier || "Cashier",
       lines,
-      sub: totalNum,
-      disc: 0,
+      sub: subtotal,
+      disc: parsedDiscount,
       tax: 0,
       total: totalNum,
-      pays: [
-        ["Cash", fm(cashNum)],
-        ["Change", fm(change)],
-      ],
+      pays,
       paidTotal: totalNum,
-      paidChange: change,
-      payment_method: "Cash",
-      payment_ref: null,
+      paidChange: method === "Cash" ? change : 0,
+      payment_method: method,
+      payment_ref: ref,
+      customer_type: customerType,
     };
+  };
 
+  const completeCash = () => {
+    if (cashNum < totalNum) return alert("Enter the full cash amount");
+
+    const pays = [
+      ["Cash", fm(cashNum)],
+      ["Change", fm(change)],
+    ];
+    if (parsedDiscount > 0) pays.unshift(["Discount", `-${fm(parsedDiscount)}`]);
+
+    const r = buildReceipt("Cash", pays, null);
     setReceipt(r);
     onComplete(r);
     setStage(1);
   };
 
   const completePaystack = () => {
-    openPaystack(totalNum, "Paystack", [["Paystack", fm(totalNum)]]);
+    const pays = [["Paystack", fm(totalNum)]];
+    if (parsedDiscount > 0) pays.unshift(["Discount", `-${fm(parsedDiscount)}`]);
+    openPaystack(totalNum, "Paystack", pays);
   };
 
   const completeSplit = () => {
     if (cashNum <= 0 || cashNum >= totalNum) {
       return alert("Enter a cash portion below the total.");
     }
-    openPaystack(momoPortion, "Split", [
+    const pays = [
       ["Cash", fm(cashNum)],
       ["Paystack (MoMo)", fm(momoPortion)],
-    ]);
+    ];
+    if (parsedDiscount > 0) pays.unshift(["Discount", `-${fm(parsedDiscount)}`]);
+    openPaystack(momoPortion, "Split", pays);
   };
 
   const openPaystack = (amount, methodLabel, paysBase) => {
@@ -810,37 +832,21 @@ function CheckoutModal({
               variable_name: "method",
               value: methodLabel,
             },
+            {
+              display_name: "Discount",
+              variable_name: "discount",
+              value: parsedDiscount.toFixed(2),
+            },
+            {
+              display_name: "Customer Type",
+              variable_name: "customer_type",
+              value: customerType,
+            },
           ],
         },
         callback: (response) => {
           const ref = response.reference || "PSK_" + Date.now();
-
-          const d = new Date();
-          const r = {
-            no:
-              "#INV-" +
-              String(1285 + Math.floor(Math.random() * 100)).padStart(6, "0"),
-            date: d.toLocaleDateString("en-GB", {
-              day: "2-digit",
-              month: "short",
-              year: "numeric",
-            }),
-            time: d.toLocaleTimeString("en", {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
-            cashier: cashier || "Cashier",
-            lines,
-            sub: totalNum,
-            disc: 0,
-            tax: 0,
-            total: totalNum,
-            pays: [...paysBase, ["Ref", ref]],
-            paidTotal: totalNum,
-            paidChange: 0,
-            payment_method: methodLabel,
-            payment_ref: ref,
-          };
+          const r = buildReceipt(methodLabel, [...paysBase, ["Ref", ref]], ref);
 
           setPaystackBusy(false);
           setReceipt(r);
@@ -873,6 +879,7 @@ function CheckoutModal({
   const canSubmit = (() => {
     if (!cashEnabled && !paystackEnabled) return false;
     if (paystackBusy) return false;
+    if (totalNum <= 0) return false;
     if (pay === "cash") return cashNum >= totalNum;
     if (pay === "paystack") return true;
     if (pay === "split") return cashNum > 0 && cashNum < totalNum && momoPortion > 0;
@@ -882,6 +889,7 @@ function CheckoutModal({
   const submitLabel = (() => {
     if (paystackBusy) return "Opening Paystack…";
     if (!cashEnabled && !paystackEnabled) return "SELECT A METHOD";
+    if (totalNum <= 0) return "INVALID TOTAL";
     if (pay === "cash") return "COMPLETE SALE";
     if (pay === "paystack") return "OPEN PAYSTACK";
     if (pay === "split") return "CHARGE CASH + MOMO";
@@ -908,7 +916,7 @@ function CheckoutModal({
                 Payment successful
               </h2>
               <p className="mt-1 text-[13px] text-gray-dim">
-                Received via {payLabel}
+                Received via {payLabel} · {customerType === "online" ? "Online" : "Walk-in"}
                 {saving && " · Saving sale…"}
               </p>
 
@@ -919,8 +927,13 @@ function CheckoutModal({
                 <b className="mt-1 block text-[34px] font-extrabold tracking-[-0.02em] text-emb">
                   {fm(receipt.paidTotal)}
                 </b>
-                {receipt.paidChange > 0 && (
+                {receipt.disc > 0 && (
                   <span className="mt-1 block text-[12px] font-semibold text-gray">
+                    Discount: −{fm(receipt.disc)}
+                  </span>
+                )}
+                {receipt.paidChange > 0 && (
+                  <span className="mt-0.5 block text-[12px] font-semibold text-gray">
                     Change: {fm(receipt.paidChange)}
                   </span>
                 )}
@@ -959,15 +972,53 @@ function CheckoutModal({
           <>
             <h2 className="mb-4 text-[18px] font-bold">Checkout</h2>
 
+            {/* Customer type */}
+            <div className="mb-4">
+              <span className="block text-[12px] font-semibold text-gray-dim">
+                Customer
+              </span>
+              <div className="mt-1 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCustomerType("walk_in")}
+                  className={`flex items-center justify-center gap-2 rounded-lg border py-3 text-[13px] font-bold transition-colors ${
+                    customerType === "walk_in"
+                      ? "border-black bg-black text-emb"
+                      : "border-lk bg-transparent text-gray-dim hover:text-bg"
+                  }`}
+                >
+                  <Store size={14} strokeWidth={2} />
+                  Walk-in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCustomerType("online")}
+                  className={`flex items-center justify-center gap-2 rounded-lg border py-3 text-[13px] font-bold transition-colors ${
+                    customerType === "online"
+                      ? "border-black bg-black text-emb"
+                      : "border-lk bg-transparent text-gray-dim hover:text-bg"
+                  }`}
+                >
+                  <Globe size={14} strokeWidth={2} />
+                  Online
+                </button>
+              </div>
+            </div>
+
+            {/* Totals summary */}
             <div className="rounded-lg border border-lk p-3">
               <div className="flex justify-between text-gray-dim">
                 <span>Subtotal</span>
-                <span>{fm(totalNum)}</span>
+                <span>{fm(subtotal)}</span>
               </div>
-              <div className="flex justify-between text-gray-dim">
-                <span>Discount</span>
-                <span>GHS 0.00</span>
-              </div>
+              {parsedDiscount > 0 && (
+                <div className="flex justify-between text-gray-dim">
+                  <span>Discount</span>
+                  <span className="font-semibold text-em">
+                    −{fm(parsedDiscount)}
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between text-gray-dim">
                 <span>Tax</span>
                 <span>GHS 0.00</span>
@@ -978,6 +1029,35 @@ function CheckoutModal({
               </div>
             </div>
 
+            {/* Discount input */}
+            <label className="mt-3 block text-[12px] font-semibold text-gray-dim">
+              Discount (optional)
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                max={Math.max(0, subtotal - 0.01).toFixed(2)}
+                className="mt-1 block w-full rounded-lg border border-lk bg-transparent px-3 py-2 text-[14px] font-medium focus:border-em focus:outline-none focus:ring-[3px] focus:ring-emb/25"
+                placeholder="0.00"
+                value={discountInput}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "") return setDiscountInput("");
+                  const n = Number(v);
+                  if (!Number.isFinite(n) || n < 0) return;
+                  const maxDisc = Math.max(0, subtotal - 0.01);
+                  setDiscountInput(String(Math.min(n, maxDisc)));
+                }}
+              />
+              {parsedDiscount > 0 && (
+                <p className="mt-1 text-[11px] font-normal text-gray-dim">
+                  Customer saves {fm(parsedDiscount)}.
+                </p>
+              )}
+            </label>
+
+            {/* Payment method */}
             <div
               className={`my-4 grid gap-2 ${
                 [cashEnabled, paystackEnabled, splitEnabled].filter(Boolean)
@@ -1159,14 +1239,14 @@ function ProductCard({ p, qty, onAdd }) {
     <button
       onClick={() => !out && onAdd(p.id)}
       disabled={out}
-      className={`group relative flex flex-col overflow-hidden rounded-xl border border-lk bg-white p-0 text-left transition-all ${
+      className={`group relative flex flex-col overflow-hidden rounded-lg border border-lk bg-white p-0 text-left transition-all md:rounded-xl ${
         out
           ? "cursor-not-allowed opacity-55"
           : "hover:-translate-y-0.5 hover:border-em hover:shadow-[0_10px_24px_rgba(0,0,0,0.1)] active:scale-[0.98]"
       }`}
     >
-      <div className="relative h-[128px] border-b border-lk bg-[#fafbf9]">
-        <span className="absolute inset-0 grid place-items-center bg-black text-[26px] font-extrabold text-emb">
+      <div className="relative h-[88px] border-b border-lk bg-[#fafbf9] md:h-[104px] xl:h-[128px]">
+        <span className="absolute inset-0 grid place-items-center bg-black text-[18px] font-extrabold text-emb md:text-[22px] xl:text-[26px]">
           {ini(p.name)}
         </span>
 
@@ -1177,7 +1257,7 @@ function ProductCard({ p, qty, onAdd }) {
             alt={p.name}
             loading="lazy"
             referrerPolicy="no-referrer"
-            className="absolute inset-0 h-full w-full bg-[#fafbf9] object-contain p-2.5"
+            className="absolute inset-0 h-full w-full bg-[#fafbf9] object-contain p-1.5 md:p-2 xl:p-2.5"
             onError={(e) => {
               e.currentTarget.remove();
             }}
@@ -1185,31 +1265,37 @@ function ProductCard({ p, qty, onAdd }) {
         )}
 
         <span
-          className={`absolute left-2 top-2 rounded-full px-2.5 py-[2px] text-[11px] font-bold ${
+          className={`absolute left-1.5 top-1.5 rounded-full px-2 py-[1px] text-[9px] font-bold md:left-2 md:top-2 md:px-2.5 md:py-[2px] md:text-[10px] xl:text-[11px] ${
             out ? "bg-black text-gray" : "bg-black text-emb"
           }`}
         >
           {out
-            ? "Out of stock"
+            ? "Out"
             : low
-            ? `Low · ${p.stock} left`
-            : `${p.stock} in stock`}
+            ? `Low · ${p.stock}`
+            : `${p.stock} in`}
         </span>
 
         {qty > 0 && (
-          <span className="absolute right-2 top-2 grid min-w-[26px] place-items-center rounded-[13px] bg-emb px-[7px] py-0 text-[12px] font-extrabold text-bg shadow-[0_0_0_3px_#fafbf9]">
+          <span className="absolute right-1.5 top-1.5 grid min-w-[20px] place-items-center rounded-[10px] bg-emb px-1.5 text-[10px] font-extrabold text-bg shadow-[0_0_0_2px_#fafbf9] md:right-2 md:top-2 md:min-w-[24px] md:px-[6px] md:text-[11px] xl:min-w-[26px] xl:rounded-[13px] xl:px-[7px] xl:text-[12px] xl:shadow-[0_0_0_3px_#fafbf9]">
             {qty}
           </span>
         )}
       </div>
 
-      <div className="relative px-3.5 pb-3.5 pt-3">
-        <b className="block pr-9 text-[14px] leading-[1.3]">{p.name}</b>
-        <small className="block text-[12px] text-gray-dim">SKU: {p.sku}</small>
-        <div className="mt-1.5 text-[16px] font-extrabold">{fm(p.price)}</div>
+      <div className="relative px-2 pb-2 pt-2 md:px-2.5 md:pb-2.5 md:pt-2.5 xl:px-3.5 xl:pb-3.5 xl:pt-3">
+        <b className="block pr-6 text-[11px] leading-[1.25] md:pr-7 md:text-[12px] xl:pr-9 xl:text-[14px] xl:leading-[1.3]">
+          {p.name}
+        </b>
+        <small className="mt-0.5 block truncate text-[10px] text-gray-dim md:text-[11px] xl:text-[12px]">
+          {p.sku}
+        </small>
+        <div className="mt-1 text-[12px] font-extrabold md:text-[13px] xl:mt-1.5 xl:text-[16px]">
+          {fm(p.price)}
+        </div>
 
         <span
-          className={`absolute bottom-3 right-3 grid h-[30px] w-[30px] place-items-center rounded-full text-[18px] font-bold transition-colors ${
+          className={`absolute bottom-1.5 right-1.5 grid h-[22px] w-[22px] place-items-center rounded-full text-[14px] font-bold transition-colors md:bottom-2 md:right-2 md:h-[26px] md:w-[26px] md:text-[16px] xl:bottom-3 xl:right-3 xl:h-[30px] xl:w-[30px] xl:text-[18px] ${
             out
               ? "bg-lk text-gray-dim"
               : "bg-black text-emb group-hover:bg-emb group-hover:text-bg"
@@ -1622,6 +1708,7 @@ export default function POSPage() {
           total: receipt.total,
           payment_method: receipt.payment_method,
           payment_ref: receipt.payment_ref,
+          customer_type: receipt.customer_type,
           status: "paid",
         })
         .select("id")
@@ -1748,7 +1835,7 @@ export default function POSPage() {
   const visibleCats = ["All", ...categories.map((c) => c.name)];
 
   return (
-    <div className="flex h-[100dvh] w-full min-w-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-7 md:px-8">
+    <div className="flex h-[100dvh] w-full min-w-0 flex-1 flex-col overflow-hidden px-3 pb-3 pt-4 md:px-4 md:pb-4 md:pt-6 xl:px-8 xl:pt-7">
       <style jsx global>{`
         @media print {
           @page {
@@ -1794,16 +1881,16 @@ export default function POSPage() {
         }
       `}</style>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:grid-cols-[1fr_400px]">
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_320px] gap-3 md:grid-cols-[minmax(0,1fr)_340px] md:gap-4 xl:grid-cols-[minmax(0,1fr)_400px] xl:gap-6">
         <div className="flex min-h-0 flex-col">
-          <div className="flex flex-none items-center gap-2 rounded-lg border border-lk px-3.5 py-2.5 text-gray focus-within:border-em focus-within:ring-[3px] focus-within:ring-emb/25">
+          <div className="flex flex-none items-center gap-2 rounded-lg border border-lk px-3 py-2 text-gray focus-within:border-em focus-within:ring-[3px] focus-within:ring-emb/25 md:px-3.5 md:py-2.5">
             <button
               type="button"
               onClick={() => setScanSourceOpen(true)}
-              className="-my-1 -ml-2 grid h-9 w-9 flex-none place-items-center rounded-lg border border-black bg-black text-emb transition-colors hover:border-emb"
+              className="-my-1 -ml-1 grid h-8 w-8 flex-none place-items-center rounded-lg border border-black bg-black text-emb transition-colors hover:border-emb md:-ml-2 md:h-9 md:w-9"
               title="Scan with camera or USB scanner"
             >
-              <ScanLine size={20} strokeWidth={1.8} />
+              <ScanLine size={18} strokeWidth={1.8} />
             </button>
             <input
               ref={searchRef}
@@ -1821,14 +1908,14 @@ export default function POSPage() {
               }}
               placeholder={
                 usbScanReady
-                  ? "USB scanner ready — pull the trigger…"
+                  ? "USB scanner ready…"
                   : "Search products or scan barcode..."
               }
-              className="w-full border-0 bg-transparent text-[14px] outline-none"
+              className="w-full border-0 bg-transparent text-[13px] outline-none md:text-[14px]"
             />
             {usbScanReady && (
               <span
-                className={`ml-2 flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                className={`ml-1 flex flex-none items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold md:ml-2 md:px-2.5 md:py-1 md:text-[11px] ${
                   usbConnected ? "bg-emd text-emb" : "bg-black text-gray"
                 }`}
                 title={
@@ -1840,29 +1927,33 @@ export default function POSPage() {
                     usbConnected ? "bg-emd" : "bg-gray"
                   }`}
                 />
-                {usbConnected ? "Scanner connected" : "Scanner ready"}
+                <span className="hidden sm:inline">
+                  {usbConnected ? "Scanner connected" : "Scanner ready"}
+                </span>
               </span>
             )}
           </div>
 
           {usbScanReady && (
-            <div className="mt-2 flex items-center justify-between rounded-lg border border-black bg-black px-3 py-2 text-[12px] font-semibold text-emb">
-              <span>USB / Bluetooth scanner armed — pull the trigger to scan.</span>
+            <div className="mt-1.5 flex items-center justify-between rounded-lg border border-black bg-black px-2.5 py-1.5 text-[11px] font-semibold text-emb md:mt-2 md:px-3 md:py-2 md:text-[12px]">
+              <span className="truncate">
+                USB / Bluetooth scanner armed — pull the trigger to scan.
+              </span>
               <button
                 onClick={() => setUsbScanReady(false)}
-                className="ml-3 rounded-md border border-emb/40 px-2 py-0.5 text-[11px]"
+                className="ml-2 flex-none rounded-md border border-emb/40 px-2 py-0.5 text-[10px] md:ml-3 md:text-[11px]"
               >
                 Turn off
               </button>
             </div>
           )}
 
-          <div className="mt-3 flex flex-none flex-wrap gap-2">
+          <div className="mt-2 flex flex-none flex-wrap gap-1.5 md:mt-3 md:gap-2">
             {visibleCats.map((c) => (
               <button
                 key={c}
                 onClick={() => setCat(c)}
-                className={`rounded-full border px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors md:px-3.5 md:py-1.5 md:text-[13px] ${
                   c === cat
                     ? "border-black bg-black text-emb"
                     : "border-lk bg-transparent text-gray-dim hover:text-bg"
@@ -1873,8 +1964,8 @@ export default function POSPage() {
             ))}
           </div>
 
-          <div className="mt-4 min-h-0 flex-1 overflow-auto">
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(176px,1fr))] gap-3.5">
+          <div className="mt-3 min-h-0 flex-1 overflow-auto md:mt-4">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-2 sm:grid-cols-[repeat(auto-fill,minmax(140px,1fr))] md:gap-2.5 lg:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] xl:grid-cols-[repeat(auto-fill,minmax(176px,1fr))] xl:gap-3.5">
               {filtered.length === 0 ? (
                 <p className="col-span-full py-8 text-center text-gray-dim">
                   No products match. Try another search or category.
@@ -1899,12 +1990,14 @@ export default function POSPage() {
           </div>
         </div>
 
-        <div className="flex h-full min-h-0 flex-col rounded-xl bg-black p-5 text-white">
-          <h2 className="mb-3 flex-none text-[16px] font-bold">Current Sale</h2>
+        <div className="flex h-full min-h-0 flex-col rounded-xl bg-black p-3 text-white md:p-4 xl:p-5">
+          <h2 className="mb-2 flex-none text-[14px] font-bold md:mb-3 md:text-[16px]">
+            Current Sale
+          </h2>
 
-          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          <div className="min-h-0 flex-1 overflow-y-auto pr-0.5 md:pr-1">
             {cart.length === 0 ? (
-              <p className="py-8 text-center text-gray">
+              <p className="py-8 text-center text-[12px] text-gray md:text-[13px]">
                 Cart is empty. Tap a product or scan a barcode.
               </p>
             ) : (
@@ -1915,42 +2008,44 @@ export default function POSPage() {
                 return (
                   <div
                     key={k}
-                    className="flex items-center gap-3 border-t border-white/10 py-2.5"
+                    className="flex items-center gap-2 border-t border-white/10 py-2 md:gap-3 md:py-2.5"
                   >
                     <CartThumb product={p} />
 
                     <div className="min-w-0 flex-1 leading-[1.3]">
-                      <div className="truncate text-[14px] font-semibold">
+                      <div className="truncate text-[12px] font-semibold md:text-[14px]">
                         {p.name}
                       </div>
-                      <small className="text-gray">{fm(p.price)} each</small>
+                      <small className="text-[11px] text-gray md:text-[12px]">
+                        {fm(p.price)} each
+                      </small>
                     </div>
 
-                    <div className="flex flex-none items-center gap-1.5">
+                    <div className="flex flex-none items-center gap-1 md:gap-1.5">
                       <button
                         onClick={() => setQty(k, -1)}
-                        className="grid h-[26px] w-[26px] place-items-center rounded-md border border-white/15 bg-white/5 text-white hover:border-emb"
+                        className="grid h-[22px] w-[22px] place-items-center rounded-md border border-white/15 bg-white/5 text-white hover:border-emb md:h-[26px] md:w-[26px]"
                         aria-label="Less"
                       >
-                        <Minus size={14} />
+                        <Minus size={12} />
                       </button>
-                      <span className="w-6 text-center text-[14px] font-semibold">
+                      <span className="w-5 text-center text-[12px] font-semibold md:w-6 md:text-[14px]">
                         {n}
                       </span>
                       <button
                         onClick={() => setQty(k, 1)}
                         disabled={atMax}
-                        className={`grid h-[26px] w-[26px] place-items-center rounded-md border border-white/15 bg-white/5 text-white transition-opacity hover:border-emb ${
+                        className={`grid h-[22px] w-[22px] place-items-center rounded-md border border-white/15 bg-white/5 text-white transition-opacity hover:border-emb md:h-[26px] md:w-[26px] ${
                           atMax ? "cursor-not-allowed opacity-40 hover:border-white/15" : ""
                         }`}
                         aria-label="More"
                         title={atMax ? "Stock limit reached" : "Add one more"}
                       >
-                        <Plus size={14} />
+                        <Plus size={12} />
                       </button>
                     </div>
 
-                    <b className="min-w-[64px] flex-none text-right text-[14px]">
+                    <b className="min-w-[52px] flex-none text-right text-[12px] md:min-w-[64px] md:text-[14px]">
                       {fm(p.price * n)}
                     </b>
                   </div>
@@ -1959,22 +2054,24 @@ export default function POSPage() {
             )}
           </div>
 
-          <div className="flex-none pt-3">
-            <div className="flex justify-between py-0.5 text-[13px] text-gray">
+          <div className="flex-none pt-2 md:pt-3">
+            <div className="flex justify-between py-0.5 text-[11px] text-gray md:text-[13px]">
               <span>Subtotal</span>
               <span>{fm(cartTotal)}</span>
             </div>
-            <div className="flex justify-between py-0.5 text-[13px] text-gray">
+            <div className="flex justify-between py-0.5 text-[11px] text-gray md:text-[13px]">
               <span>Discount</span>
               <span>GHS 0.00</span>
             </div>
-            <div className="flex justify-between py-0.5 text-[13px] text-gray">
+            <div className="flex justify-between py-0.5 text-[11px] text-gray md:text-[13px]">
               <span>Tax</span>
               <span>GHS 0.00</span>
             </div>
-            <div className="mt-2 flex items-baseline justify-between border-t border-white/10 pt-3">
-              <span className="text-[14px] font-semibold">TOTAL</span>
-              <b className="text-[30px] font-extrabold tracking-[-0.02em] text-emb">
+            <div className="mt-1.5 flex items-baseline justify-between border-t border-white/10 pt-2 md:mt-2 md:pt-3">
+              <span className="text-[12px] font-semibold md:text-[14px]">
+                TOTAL
+              </span>
+              <b className="text-[24px] font-extrabold tracking-[-0.02em] text-emb md:text-[30px]">
                 {fm(cartTotal)}
               </b>
             </div>
@@ -1983,12 +2080,12 @@ export default function POSPage() {
                 if (cart.length === 0) return alert("Add a product first");
                 setCheckoutOpen(true);
               }}
-              className="mt-3 w-full rounded-lg border border-emb bg-emb py-3.5 text-[14px] font-extrabold tracking-[0.04em] text-bg transition-colors hover:bg-em"
+              className="mt-2 w-full rounded-lg border border-emb bg-emb py-2.5 text-[12px] font-extrabold tracking-[0.04em] text-bg transition-colors hover:bg-em md:mt-3 md:py-3.5 md:text-[14px]"
             >
               CHECKOUT
             </button>
             <button
-              className="mt-2 w-full rounded-lg border border-white/15 bg-transparent py-2.5 text-[14px] font-semibold text-white"
+              className="mt-1.5 w-full rounded-lg border border-white/15 bg-transparent py-2 text-[12px] font-semibold text-white md:mt-2 md:py-2.5 md:text-[14px]"
               onClick={() => alert("Sale held")}
             >
               Hold Sale
