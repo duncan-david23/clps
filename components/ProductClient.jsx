@@ -155,7 +155,7 @@ const inputCls =
   "block w-full rounded-lg border border-lk bg-transparent px-3 py-2 text-[14px] font-medium text-bg focus:border-em focus:outline-none focus:ring-[3px] focus:ring-emb/25 transition-colors";
 
 /* ============================================================
-   ImageUploader (Cloudinary)
+   ImageUploader
    ============================================================ */
 function ImageUploader({ value, onChange, folder = "product-images" }) {
   const inputRef = useRef(null);
@@ -248,7 +248,7 @@ function ImageUploader({ value, onChange, folder = "product-images" }) {
 }
 
 /* ============================================================
-   ImagePreview — large image modal
+   ImagePreview
    ============================================================ */
 function ImagePreview({ product, onClose }) {
   useEffect(() => {
@@ -315,7 +315,7 @@ function ImagePreview({ product, onClose }) {
 }
 
 /* ============================================================
-   ProductThumb — click to open preview
+   ProductThumb
    ============================================================ */
 function ProductThumb({ product, size = "md" }) {
   const [previewing, setPreviewing] = useState(false);
@@ -359,7 +359,9 @@ function ProductThumb({ product, size = "md" }) {
         )}
       </button>
 
-      {previewing && <ImagePreview product={product} onClose={() => setPreviewing(false)} />}
+      {previewing && (
+        <ImagePreview product={product} onClose={() => setPreviewing(false)} />
+      )}
     </>
   );
 }

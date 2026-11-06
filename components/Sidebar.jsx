@@ -37,7 +37,7 @@ const NAV = [
       { key: "products", label: "Products", href: "/products", icon: Package },
       { key: "categories", label: "Categories", href: "/categories", icon: ListTodo },
       { key: "inventory", label: "Inventory", href: "/inventory", icon: Warehouse },
-      { key: "sales", label: "Sales", href: "/sales", icon: TrendingUp, staffVisible: true },
+      { key: "sales", label: "Sales", href: "/sales", icon: TrendingUp, staffVisible: false },
     ],
   },
   {

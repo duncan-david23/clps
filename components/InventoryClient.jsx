@@ -15,6 +15,7 @@ import {
   X,
   ClipboardList,
   Download,
+  Printer,
   ZoomIn,
   Loader2,
 } from "lucide-react";
@@ -63,31 +64,271 @@ function StatusPill({ status }) {
 const inputCls =
   "block w-full rounded-lg border border-lk bg-transparent px-3 py-2 text-[14px] font-medium text-black transition-colors focus:border-em focus:outline-none focus:ring-[3px] focus:ring-emb/25 placeholder:text-gray-dim disabled:opacity-60 disabled:cursor-not-allowed";
 
+const LABEL_PRESETS = [
+  { key: "50x25", label: "50 × 25 mm", width: 50, height: 25 },
+  { key: "58x40", label: "58 × 40 mm", width: 58, height: 40 },
+  { key: "40x30", label: "40 × 30 mm", width: 40, height: 30 },
+  { key: "custom", label: "Custom…", width: 0, height: 0 },
+];
+
 /* ============================================================
-   Barcode preview modal
+   EAN-13
+   ============================================================ */
+const L7 = [
+  "0001101","0011001","0010011","0111101","0100011",
+  "0110001","0101111","0111011","0110111","0001011",
+];
+const R7 = L7.map((c) => c.replace(/[01]/g, (d) => (d === "1" ? "0" : "1")));
+const G7 = R7.map((c) => [...c].reverse().join(""));
+const PAR = [
+  "LLLLLL","LLGLGG","LLGGLG","LLGGGL","LGLLGG",
+  "LGGLLG","LGGGLL","LGLGLG","LGLGGL","LGGLGL",
+];
+
+function ean(v) {
+  v = (v || "").replace(/\D/g, "");
+  if (v.length === 12) {
+    let t = 0;
+    [...v].forEach((d, i) => (t += d * (i % 2 ? 3 : 1)));
+    v += (10 - (t % 10)) % 10;
+  }
+  return v;
+}
+
+function eanOk(v) {
+  return /^\d{13}$/.test(v) && ean(v.slice(0, 12)) === v;
+}
+
+function escapeXml(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+/**
+ * Build a self-contained EAN-13 label SVG.
+ * Codes sit tight together — no extra horizontal padding around them.
+ */
+/**
+ * Build a standard EAN-13 label SVG.
+ */
+function buildLabelSvg(code, name, widthMm, heightMm) {
+  const safeCode = ean(code);
+  if (!eanOk(safeCode)) return "";
+
+  const W = 400;
+  const H = Math.max(60, Math.round((W * heightMm) / widthMm));
+
+  // Vertical budget allocation
+  const topPad = Math.round(H * 0.06);
+  const botPad = Math.round(H * 0.06);
+  const gap1 = Math.round(H * 0.04);
+  const usableH = H - topPad - botPad - gap1;
+
+  const nameRow = Math.round(usableH * 0.22);
+  const barcodeRow = usableH - nameRow;
+
+  const nameTop = topPad;
+  const barsTop = nameTop + nameRow + gap1;
+
+  const nameFont = Math.max(8, Math.round(nameRow * 0.65));
+  const nameBaseline = nameTop + nameRow * 0.7;
+
+  // EAN-13 structure: 95 modules total (3 guard, 42 left, 5 center, 42 right, 3 guard)
+  const padX = Math.round(W * 0.08); // Margins on left and right
+  const p = PAR[safeCode[0]];
+  let bits = "101";
+  for (let i = 0; i < 6; i++) bits += (p[i] === "L" ? L7 : G7)[safeCode[i + 1]];
+  bits += "01010";
+  for (let i = 7; i < 13; i++) bits += R7[safeCode[i]];
+  bits += "101";
+
+  const totalModules = bits.length; // 95 modules
+  const moduleW = (W - padX * 2) / totalModules;
+
+  // Bar height settings
+  const guardExtra = Math.round(barcodeRow * 0.14);
+  const dataBarH = Math.round(barcodeRow * 0.72);
+  const guardBarH = dataBarH + guardExtra;
+
+  let bars = "";
+  [...bits].forEach((x, i) => {
+    if (x === "1") {
+      const isGuard = i < 3 || i > bits.length - 4 || (i >= 45 && i < 50);
+      const bh = isGuard ? guardBarH : dataBarH;
+      const bx = padX + i * moduleW;
+      bars += `<rect x="${bx.toFixed(2)}" y="${barsTop}" width="${moduleW.toFixed(2)}" height="${bh}"/>`;
+    }
+  });
+
+  // Digits positioning
+  const leftDigit = safeCode[0];
+  const midDigits = safeCode.slice(1, 7);
+  const rightDigits = safeCode.slice(7);
+
+  const codeFont = Math.max(8, Math.round(barcodeRow * 0.22));
+  const codeBaseline = barsTop + dataBarH + (barcodeRow - dataBarH) * 0.75;
+
+  // Center coordinates for digit groups
+  const firstDigitX = padX - moduleW * 4;
+  const midGroupX = padX + 24 * moduleW; // Center of left 6 modules (3 + 21)
+  const rightGroupX = padX + 71 * moduleW; // Center of right 6 modules (47.5 + 21)
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+    <rect width="${W}" height="${H}" fill="#ffffff"/>
+    <text x="${(W / 2).toFixed(2)}" y="${nameBaseline.toFixed(2)}" text-anchor="middle"
+      font-family="Manrope, Arial, Helvetica, sans-serif"
+      font-size="${nameFont}" font-weight="700" fill="#000000">
+      ${escapeXml(name).slice(0, 40)}
+    </text>
+    <g fill="#000000">${bars}</g>
+    <g font-family="ui-monospace, Menlo, Consolas, monospace"
+       font-size="${codeFont}" font-weight="600" fill="#000000">
+      <!-- First lead digit -->
+      <text x="${firstDigitX.toFixed(2)}" y="${codeBaseline.toFixed(2)}" text-anchor="middle">${leftDigit}</text>
+      <!-- Left 6 digits under left block -->
+      <text x="${midGroupX.toFixed(2)}" y="${codeBaseline.toFixed(2)}" text-anchor="middle" letter-spacing="${(moduleW * 0.9).toFixed(2)}">${midDigits}</text>
+      <!-- Right 6 digits under right block -->
+      <text x="${rightGroupX.toFixed(2)}" y="${codeBaseline.toFixed(2)}" text-anchor="middle" letter-spacing="${(moduleW * 0.9).toFixed(2)}">${rightDigits}</text>
+    </g>
+  </svg>`;
+}
+
+/* ============================================================
+   BarcodeModal
    ============================================================ */
 function BarcodeModal({ product, onClose }) {
+  const [preset, setPreset] = useState("50x25");
+  const [customW, setCustomW] = useState("60");
+  const [customH, setCustomH] = useState("30");
+  const [printing, setPrinting] = useState(false);
+  const [printError, setPrintError] = useState("");
+
+  const selected = LABEL_PRESETS.find((p) => p.key === preset);
+  const widthMm = preset === "custom" ? Number(customW) || 0 : selected.width;
+  const heightMm = preset === "custom" ? Number(customH) || 0 : selected.height;
+  const validSize = widthMm >= 20 && heightMm >= 15;
+  const validCode = eanOk(ean(product.barcode));
+
+  const labelSvg = useMemo(
+    () =>
+      validCode
+        ? buildLabelSvg(product.barcode, product.name, widthMm, heightMm)
+        : "",
+    [product.barcode, product.name, widthMm, heightMm, validCode]
+  );
+
   const filename = `${(product.sku || product.name || "barcode")
     .toString()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")}.svg`;
 
-  const handleDownload = async () => {
-    if (!product.barcodeImageUrl) return;
+  const handleDownload = () => {
+    if (!labelSvg) return;
+    const blob = new Blob([labelSvg], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handlePrint = () => {
+    if (!labelSvg || !validSize) return;
+    setPrintError("");
+    setPrinting(true);
+
+    const rootId = "barcode-print-root";
+    const styleId = "barcode-print-style";
+
+    document.getElementById(rootId)?.remove();
+    document.getElementById(styleId)?.remove();
+
+    const container = document.createElement("div");
+    container.id = rootId;
+    container.style.cssText =
+      "position:fixed;inset:0;background:#fff;z-index:2147483647;display:none;padding:0;margin:0;";
+
+    const inner = document.createElement("div");
+    inner.style.cssText = `
+      width:${widthMm}mm;
+      height:${heightMm}mm;
+      box-sizing:border-box;
+      overflow:hidden;
+      background:#fff;
+    `;
+    inner.innerHTML = labelSvg;
+
+    container.appendChild(inner);
+    document.documentElement.appendChild(container);
+
+    const style = document.createElement("style");
+    style.id = styleId;
+    style.textContent = `
+      @media print {
+        @page {
+          size: ${widthMm}mm ${heightMm}mm;
+          margin: 0;
+        }
+        html, body {
+          margin: 0 !important;
+          padding: 0 !important;
+          width: ${widthMm}mm !important;
+          height: ${heightMm}mm !important;
+          background: #fff !important;
+          overflow: hidden !important;
+        }
+        body * {
+          visibility: hidden !important;
+          display: none !important;
+        }
+        #${rootId},
+        #${rootId} * {
+          visibility: visible !important;
+          display: revert !important;
+        }
+        #${rootId} {
+          position: absolute !important;
+          left: 0 !important;
+          top: 0 !important;
+          width: ${widthMm}mm !important;
+          height: ${heightMm}mm !important;
+          overflow: hidden !important;
+          background: #fff !important;
+        }
+        #${rootId} > div {
+          width: ${widthMm}mm !important;
+          height: ${heightMm}mm !important;
+        }
+        #${rootId} svg {
+          display: block !important;
+          width: ${widthMm}mm !important;
+          height: ${heightMm}mm !important;
+          page-break-inside: avoid !important;
+          break-inside: avoid !important;
+        }
+      }
+    `;
+    document.head.appendChild(style);
 
     try {
-      const res = await fetch(product.barcodeImageUrl);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      window.open(product.barcodeImageUrl, "_blank");
+      window.print();
+    } catch {
+      setPrintError(
+        "Print dialog failed to open. Try downloading the SVG and printing it from a design app."
+      );
+    } finally {
+      setTimeout(() => {
+        document.getElementById(rootId)?.remove();
+        document.getElementById(styleId)?.remove();
+        setPrinting(false);
+      }, 500);
     }
   };
 
@@ -122,20 +363,70 @@ function BarcodeModal({ product, onClose }) {
         </div>
 
         <div className="grid place-items-center bg-black/[0.02] p-8">
-          {product.barcodeImageUrl ? (
-            <div className="w-full max-w-[420px] rounded-xl border border-lk bg-white p-6">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={product.barcodeImageUrl}
-                alt={product.barcode || "Barcode"}
-                className="mx-auto block h-auto w-full"
-              />
-            </div>
+          {labelSvg ? (
+            <div
+              className="w-full max-w-[420px] overflow-hidden rounded-xl border border-lk bg-white p-3"
+              style={{ aspectRatio: `${widthMm} / ${heightMm}` }}
+              dangerouslySetInnerHTML={{ __html: labelSvg }}
+            />
           ) : (
             <div className="py-16 text-center">
               <p className="text-[13px] text-gray-dim">
-                No barcode image stored for this product.
+                This product has no valid EAN-13 barcode to print.
               </p>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-lk px-5 py-4">
+          <label className="block text-[12px] font-semibold text-gray-dim">
+            Label size
+            <select
+              value={preset}
+              onChange={(e) => setPreset(e.target.value)}
+              className="mt-1 block w-full rounded-lg border border-lk bg-transparent px-3 py-2 text-[14px] font-medium text-black focus:border-em focus:outline-none"
+            >
+              {LABEL_PRESETS.map((p) => (
+                <option key={p.key} value={p.key}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {preset === "custom" && (
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <label className="block text-[12px] font-semibold text-gray-dim">
+                Width (mm)
+                <input
+                  type="number"
+                  min="20"
+                  value={customW}
+                  onChange={(e) => setCustomW(e.target.value)}
+                  className="mt-1 block w-full rounded-lg border border-lk bg-transparent px-3 py-2 text-[14px] text-black focus:border-em focus:outline-none"
+                />
+              </label>
+              <label className="block text-[12px] font-semibold text-gray-dim">
+                Height (mm)
+                <input
+                  type="number"
+                  min="15"
+                  value={customH}
+                  onChange={(e) => setCustomH(e.target.value)}
+                  className="mt-1 block w-full rounded-lg border border-lk bg-transparent px-3 py-2 text-[14px] text-black focus:border-em focus:outline-none"
+                />
+              </label>
+            </div>
+          )}
+
+          <p className="mt-2 text-[11px] text-gray-dim">
+            One label prints with the product name, barcode bars, and code
+            number, all fit inside the dimensions you choose.
+          </p>
+
+          {printError && (
+            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-semibold text-red-700">
+              {printError}
             </div>
           )}
         </div>
@@ -148,12 +439,27 @@ function BarcodeModal({ product, onClose }) {
             Close
           </button>
           <button
-            onClick={handleDownload}
-            disabled={!product.barcodeImageUrl}
+            onClick={handlePrint}
+            disabled={!labelSvg || printing || !validSize}
             className="flex items-center justify-center gap-2 rounded-lg border border-black bg-black py-2.5 text-[14px] font-semibold text-white transition-colors hover:border-emb hover:text-emb disabled:opacity-50"
           >
-            <Download size={15} strokeWidth={2} />
-            Download SVG
+            {printing ? (
+              <Loader2 size={15} strokeWidth={2.2} className="animate-spin" />
+            ) : (
+              <Printer size={15} strokeWidth={2} />
+            )}
+            {printing ? "Printing…" : "Print barcode"}
+          </button>
+        </div>
+
+        <div className="border-t border-lk px-4 pb-4 pt-0">
+          <button
+            onClick={handleDownload}
+            disabled={!labelSvg}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-lk bg-transparent py-2.5 text-[13px] font-semibold text-gray-dim transition-colors hover:border-em hover:text-black disabled:opacity-50"
+          >
+            <Download size={14} strokeWidth={2} />
+            Download SVG instead
           </button>
         </div>
       </div>
@@ -162,7 +468,7 @@ function BarcodeModal({ product, onClose }) {
 }
 
 /* ============================================================
-   Large image preview modal
+   ImagePreview
    ============================================================ */
 function ImagePreview({ product, onClose }) {
   useEffect(() => {
@@ -239,7 +545,7 @@ function ImagePreview({ product, onClose }) {
 }
 
 /* ============================================================
-   ProductThumb — click to open large image preview
+   ProductThumb
    ============================================================ */
 function ProductThumb({ product }) {
   const [previewing, setPreviewing] = useState(false);
@@ -287,7 +593,7 @@ function ProductThumb({ product }) {
 }
 
 /* ============================================================
-   Adjust stock modal — with saving state
+   AdjustModal
    ============================================================ */
 function AdjustModal({ product, onClose, onSave }) {
   const [mode, setMode] = useState(product.mode || "in");
@@ -322,8 +628,6 @@ function AdjustModal({ product, onClose, onSave }) {
       projected,
     });
 
-    // Parent returns { ok, error }. On success, it will unmount this modal.
-    // On failure, we keep it open and show the message.
     if (res && !res.ok) {
       setError(res.error || "Could not update stock. Try again.");
       setSaving(false);
@@ -339,9 +643,7 @@ function AdjustModal({ product, onClose, onSave }) {
   return (
     <div
       className="fixed inset-0 z-10 grid place-items-center bg-black/60 p-4"
-      onClick={(e) =>
-        e.target === e.currentTarget && !saving && onClose()
-      }
+      onClick={(e) => e.target === e.currentTarget && !saving && onClose()}
     >
       <div className="w-full max-w-[480px] rounded-2xl bg-white p-6">
         <div className="mb-5 flex items-center justify-between">
@@ -482,7 +784,6 @@ export default function InventoryPage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [barcodeTarget, setBarcodeTarget] = useState(null);
 
-  /* ---------- Load ---------- */
   async function loadAll() {
     setLoading(true);
     setLoadError("");
@@ -543,7 +844,6 @@ export default function InventoryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ---------- Filters ---------- */
   const filtered = useMemo(
     () =>
       items.filter((p) => {
@@ -566,7 +866,6 @@ export default function InventoryPage() {
     [items, q, catFilter, statusFilter]
   );
 
-  /* ---------- Totals ---------- */
   const totals = useMemo(() => {
     const units = items.reduce((a, p) => a + p.stock, 0);
     const low = items.filter((p) => stk(p.stock, p.low) === "Low Stock").length;
@@ -575,7 +874,6 @@ export default function InventoryPage() {
     return { units, low, out, value };
   }, [items]);
 
-  /* ---------- Adjust stock (returns { ok, error }) ---------- */
   const applyAdjust = async ({ mode, qty, reason, projected }) => {
     if (!adjustTarget) return { ok: false, error: "No product selected." };
 
@@ -616,7 +914,6 @@ export default function InventoryPage() {
     return { ok: true };
   };
 
-  /* ---------- Loading / error ---------- */
   if (loading) {
     return (
       <div className="flex min-h-[60vh] w-full items-center justify-center">
@@ -639,7 +936,6 @@ export default function InventoryPage() {
 
   return (
     <div className="flex-1 overflow-auto px-4 pb-12 pt-7 md:px-8">
-      {/* Header */}
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="m-0 text-[24px] font-extrabold tracking-[-0.02em]">
@@ -658,7 +954,6 @@ export default function InventoryPage() {
         </button>
       </div>
 
-      {/* Summary */}
       <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <div className="relative overflow-hidden rounded-xl border border-black bg-black p-5 text-white">
           <span className="text-[12px] font-semibold text-gray">
@@ -723,7 +1018,6 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {/* Table card */}
       <div className="overflow-hidden rounded-xl border border-lk">
         <div className="flex flex-wrap items-center gap-3 border-b border-lk p-4">
           <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-lg border border-lk px-3 py-2 text-gray transition-colors focus-within:border-em focus-within:ring-[3px] focus-within:ring-emb/25">
@@ -920,7 +1214,6 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {/* Adjust modal — includes its own saving state */}
       {adjustTarget && (
         <AdjustModal
           key={`${adjustTarget.id}-${adjustTarget.mode}`}
@@ -930,7 +1223,6 @@ export default function InventoryPage() {
         />
       )}
 
-      {/* Barcode preview modal */}
       {barcodeTarget && (
         <BarcodeModal
           product={barcodeTarget}
@@ -938,7 +1230,6 @@ export default function InventoryPage() {
         />
       )}
 
-      {/* History drawer */}
       {historyOpen && (
         <div
           className="fixed inset-0 z-10 grid place-items-end bg-black/60 md:place-items-center"
