@@ -180,7 +180,7 @@ function Seg({ options, value, onChange }) {
 /* ============================================================
    Delete confirmation modal
    ============================================================ */
-function DeleteConfirmModal({ title, description, count, busy, onCancel, onConfirm }) {
+function DeleteConfirmModal({ title, description, busy, onCancel, onConfirm }) {
   return (
     <div
       className="fixed inset-0 z-30 grid place-items-center bg-bg/60 p-4"
@@ -197,12 +197,9 @@ function DeleteConfirmModal({ title, description, count, busy, onCancel, onConfi
           </div>
         </div>
 
-        {count > 0 && (
-          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-semibold text-red-700">
-            {count} sale{count === 1 ? "" : "s"} will be permanently deleted.
-            Stock quantities will be restored.
-          </div>
-        )}
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-semibold text-red-700">
+          This action cannot be undone. Stock quantities will be restored.
+        </div>
 
         <div className="grid grid-cols-2 gap-3">
           <button
@@ -280,11 +277,10 @@ export default function SalesPage() {
   const [preview, setPreview] = useState(null);
 
   // Delete state
-  const [deleteTarget, setDeleteTarget] = useState(null); // single sale
-  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
-  const [toast, setToast] = useState(null); // { kind, msg }
+  const [toast, setToast] = useState(null);
 
   /* ---------- Load ---------- */
   useEffect(() => {
@@ -511,46 +507,35 @@ export default function SalesPage() {
 
   /* ---------- Escape closes overlays ---------- */
   useEffect(() => {
-    if (!preview && !deleteTarget && !bulkDeleteOpen) return;
+    if (!preview && !deleteTarget) return;
     const onKey = (e) => {
       if (e.key !== "Escape") return;
       if (deleting) return;
       if (preview) setPreview(null);
       if (deleteTarget) setDeleteTarget(null);
-      if (bulkDeleteOpen) setBulkDeleteOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [preview, deleteTarget, bulkDeleteOpen, deleting]);
+  }, [preview, deleteTarget, deleting]);
 
   /* ============================================================
-     DELETE — core operations
+     DELETE — single sale only
      ============================================================ */
 
-  /**
-   * Restore stock for a set of sales. Each sale's line items are
-   * summed by product_id and added back to the product's stock.
-   * Best-effort: if stock restoration fails, we still continue
-   * deleting so the user isn't blocked, but we report it.
-   */
-  const restoreStockForSales = async (saleRows) => {
-    // saleRows: array of { id, lines: [{ product_id, quantity }] }
+  const restoreStockForSale = async (lines) => {
     const qtyByProduct = new Map();
-    saleRows.forEach((s) => {
-      (s.lines || []).forEach((l) => {
-        if (!l.product_id) return;
-        const q = Number(l.quantity) || 0;
-        if (q <= 0) return;
-        qtyByProduct.set(
-          l.product_id,
-          (qtyByProduct.get(l.product_id) || 0) + q
-        );
-      });
+    (lines || []).forEach((l) => {
+      if (!l.product_id) return;
+      const q = Number(l.quantity) || 0;
+      if (q <= 0) return;
+      qtyByProduct.set(
+        l.product_id,
+        (qtyByProduct.get(l.product_id) || 0) + q
+      );
     });
 
-    if (qtyByProduct.size === 0) return { ok: true, restored: 0 };
+    if (qtyByProduct.size === 0) return { ok: true };
 
-    // Fetch current stock for all affected products in one query
     const productIds = [...qtyByProduct.keys()];
     const { data: products, error: fetchErr } = await supabase
       .from("products")
@@ -561,7 +546,6 @@ export default function SalesPage() {
 
     const stockMap = new Map((products || []).map((p) => [p.id, p.stock]));
 
-    // Update each product's stock back up
     const updates = await Promise.all(
       productIds.map(async (pid) => {
         const current = stockMap.get(pid);
@@ -576,25 +560,14 @@ export default function SalesPage() {
       })
     );
 
-    const failed = updates.filter((u) => !u.ok);
-    if (failed.length) {
-      return { ok: false, error: failed[0].error || "Stock restore failed" };
-    }
-    return { ok: true, restored: productIds.length };
+    const failed = updates.find((u) => !u.ok);
+    if (failed) return { ok: false, error: failed.error };
+    return { ok: true };
   };
 
-  /**
-   * Delete one sale:
-   *  1. Fetch its sale_items (to know how much stock to restore)
-   *  2. Restore product stock
-   *  3. Delete sale_items (FK)
-   *  4. Delete sale row
-   *  5. Update local state
-   */
   const deleteOneSale = async (sale) => {
     setDeleteError("");
 
-    // 1. Fetch the sale_items for this sale
     const { data: itemRows, error: itemFetchErr } = await supabase
       .from("sale_items")
       .select("product_id, quantity")
@@ -604,16 +577,11 @@ export default function SalesPage() {
       return { ok: false, error: itemFetchErr.message };
     }
 
-    // 2. Restore stock
-    const restore = await restoreStockForSales([
-      { id: sale.id, lines: itemRows || [] },
-    ]);
+    const restore = await restoreStockForSale(itemRows || []);
     if (!restore.ok) {
-      // Non-fatal: we log but still delete. The user asked to delete.
       console.warn("Stock restore warning:", restore.error);
     }
 
-    // 3. Delete sale_items
     const { error: itemsDelErr } = await supabase
       .from("sale_items")
       .delete()
@@ -622,7 +590,6 @@ export default function SalesPage() {
       return { ok: false, error: itemsDelErr.message };
     }
 
-    // 4. Delete the sale row
     const { error: saleDelErr } = await supabase
       .from("sales")
       .delete()
@@ -631,89 +598,17 @@ export default function SalesPage() {
       return { ok: false, error: saleDelErr.message };
     }
 
-    // 5. Update local state
     setSales((list) => list.filter((s) => s.id !== sale.id));
     if (preview?.id === sale.id) setPreview(null);
 
     return { ok: true };
   };
 
-  /**
-   * Bulk delete the currently filtered sales.
-   * Batched to avoid hitting URL length limits on `.in()`.
-   */
-  const deleteFilteredSales = async () => {
-    setDeleteError("");
-    const targets = filtered;
-    if (targets.length === 0) return { ok: true, deleted: 0 };
-
-    const ids = targets.map((s) => s.id);
-    const BATCH = 100;
-    let deletedCount = 0;
-
-    // Fetch ALL sale_items in batches so we can restore stock in one go
-    const allItems = [];
-    for (let i = 0; i < ids.length; i += BATCH) {
-      const slice = ids.slice(i, i + BATCH);
-      const { data, error } = await supabase
-        .from("sale_items")
-        .select("sale_id, product_id, quantity")
-        .in("sale_id", slice);
-      if (error) return { ok: false, error: error.message };
-      allItems.push(...(data || []));
-    }
-
-    const itemsBySale = new Map();
-    allItems.forEach((it) => {
-      if (!itemsBySale.has(it.sale_id)) itemsBySale.set(it.sale_id, []);
-      itemsBySale.get(it.sale_id).push(it);
-    });
-
-    // Restore stock once for all affected products
-    const restore = await restoreStockForSales(
-      targets.map((s) => ({
-        id: s.id,
-        lines: itemsBySale.get(s.id) || [],
-      }))
-    );
-    if (!restore.ok) {
-      console.warn("Bulk stock restore warning:", restore.error);
-    }
-
-    // Delete in batches
-    for (let i = 0; i < ids.length; i += BATCH) {
-      const slice = ids.slice(i, i + BATCH);
-
-      const { error: itemsErr } = await supabase
-        .from("sale_items")
-        .delete()
-        .in("sale_id", slice);
-      if (itemsErr) return { ok: false, error: itemsErr.message };
-
-      const { error: saleErr } = await supabase
-        .from("sales")
-        .delete()
-        .in("id", slice);
-      if (saleErr) return { ok: false, error: saleErr.message };
-
-      deletedCount += slice.length;
-    }
-
-    // Update local state
-    const idSet = new Set(ids);
-    setSales((list) => list.filter((s) => !idSet.has(s.id)));
-    if (preview && idSet.has(preview.id)) setPreview(null);
-
-    return { ok: true, deleted: deletedCount };
-  };
-
-  /* ============================================================
-     Handlers for the confirm modals
-     ============================================================ */
-  const handleConfirmDeleteOne = async () => {
+  const handleConfirmDelete = async () => {
     if (!deleteTarget || deleting) return;
+    const target = deleteTarget;
     setDeleting(true);
-    const res = await deleteOneSale(deleteTarget);
+    const res = await deleteOneSale(target);
     setDeleting(false);
 
     if (!res.ok) {
@@ -721,21 +616,7 @@ export default function SalesPage() {
       return;
     }
     setDeleteTarget(null);
-    setToast({ kind: "ok", msg: `Sale ${deleteTarget.receipt_no} deleted.` });
-  };
-
-  const handleConfirmBulkDelete = async () => {
-    if (deleting) return;
-    setDeleting(true);
-    const res = await deleteFilteredSales();
-    setDeleting(false);
-
-    if (!res.ok) {
-      setDeleteError(res.error || "Could not delete sales.");
-      return;
-    }
-    setBulkDeleteOpen(false);
-    setToast({ kind: "ok", msg: `${res.deleted} sale${res.deleted === 1 ? "" : "s"} deleted.` });
+    setToast({ kind: "ok", msg: `Sale ${target.receipt_no} deleted.` });
   };
 
   if (loading) {
@@ -852,18 +733,6 @@ export default function SalesPage() {
           >
             <Printer size={16} strokeWidth={1.8} />
             Print
-          </button>
-          <button
-            onClick={() => {
-              if (filtered.length === 0) return;
-              setDeleteError("");
-              setBulkDeleteOpen(true);
-            }}
-            disabled={filtered.length === 0}
-            className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2 text-[14px] font-semibold text-red-700 transition-colors hover:border-red-400 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Trash2 size={16} strokeWidth={1.8} />
-            Delete filtered ({filtered.length})
           </button>
         </div>
       </div>
@@ -1057,7 +926,7 @@ export default function SalesPage() {
                             setDeleteError("");
                             setDeleteTarget(s);
                           }}
-                          className="grid h-8 w-8 place-items-center rounded-lg border border-lk bg-transparent text-gray-dim transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600"
+                          className="grid h-8 w-8 place-items-center rounded-lg border border-lk bg-transparent text-gray-dim transition-colors hover:border-em hover:text-bg"
                           aria-label={`Delete sale ${s.receipt_no}`}
                           title="Delete sale"
                         >
@@ -1162,7 +1031,7 @@ export default function SalesPage() {
                 Print
               </button>
               <button
-                className="flex items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 py-2.5 text-[13px] font-semibold text-red-700 transition-colors hover:border-red-400 hover:bg-red-100"
+                className="flex items-center justify-center gap-2 rounded-lg border border-lk bg-transparent py-2.5 text-[13px] font-semibold transition-colors hover:border-em"
                 onClick={() => {
                   setDeleteError("");
                   setDeleteTarget(preview);
@@ -1182,39 +1051,19 @@ export default function SalesPage() {
         </div>
       )}
 
-      {/* Single delete confirmation */}
       {deleteTarget && (
         <DeleteConfirmModal
           title="Delete this sale?"
           description={`Sale ${deleteTarget.receipt_no} (${fm(
             deleteTarget.total
-          )}) will be removed from the database.`}
-          count={1}
+          )}) will be permanently removed from the database.`}
           busy={deleting}
           onCancel={() => {
             if (deleting) return;
             setDeleteTarget(null);
             setDeleteError("");
           }}
-          onConfirm={handleConfirmDeleteOne}
-        />
-      )}
-
-      {/* Bulk delete confirmation */}
-      {bulkDeleteOpen && (
-        <DeleteConfirmModal
-          title={`Delete ${filtered.length} sale${
-            filtered.length === 1 ? "" : "s"
-          }?`}
-          description="This will permanently delete all sales matching the current filters."
-          count={filtered.length}
-          busy={deleting}
-          onCancel={() => {
-            if (deleting) return;
-            setBulkDeleteOpen(false);
-            setDeleteError("");
-          }}
-          onConfirm={handleConfirmBulkDelete}
+          onConfirm={handleConfirmDelete}
         />
       )}
     </div>
